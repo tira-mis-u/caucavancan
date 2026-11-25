@@ -1,0 +1,6 @@
+# Windows
+Thumbs.db
+desktop.ini
+
+# Cài đặt cá nhân của Claude Code (không chia sẻ)
+.claude/settings.local.json

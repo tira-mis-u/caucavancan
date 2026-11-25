@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Câu Cá Vạn Cân 3D</title>
+  <link href="fonts/fonts.css" rel="stylesheet" />
+  <style>
+    html, body { margin: 0; padding: 0; overflow: hidden; background: #0b1a2a; height: 100%; }
+    #game { display: block; width: 100vw; height: 100vh; }
+    #ui { position: fixed; inset: 0; pointer-events: none; font-family: 'Be Vietnam Pro', system-ui, sans-serif; }
+    #loading { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; color: #fff; font: 800 28px 'Be Vietnam Pro', sans-serif; background: #0b1a2a; z-index: 99; }
+  </style>
+</head>
+<body>
+  <canvas id="game"></canvas>
+  <div id="ui"></div>
+  <div id="loading">🎣 Đang tải Câu Cá Vạn Cân...</div>
+
+  <script src="vendor/three/three.min.js"></script>
+  <script src="js/core.js"></script>
+  <script src="js/data.js"></script>
+  <!-- three.js r128 + hậu kỳ (bản global) để sẵn trong vendor/ — chạy được khi không có mạng -->
+  <script src="vendor/three/CopyShader.js"></script>
+  <script src="vendor/three/LuminosityHighPassShader.js"></script>
+  <script src="vendor/three/FXAAShader.js"></script>
+  <script src="vendor/three/EffectComposer.js"></script>
+  <script src="vendor/three/RenderPass.js"></script>
+  <script src="vendor/three/ShaderPass.js"></script>
+  <script src="vendor/three/UnrealBloomPass.js"></script>
+  <script src="js/physics.js"></script>
+  <script src="js/gfx.js"></script>
+  <script src="js/audio.js"></script>
+  <script src="js/fx.js"></script>
+  <script src="js/world.js"></script>
+  <script src="js/fish.js"></script>
+  <script src="js/player.js"></script>
+  <script src="js/fishing.js"></script>
+  <script src="js/systems.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>
