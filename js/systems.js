@@ -44,6 +44,7 @@
     if (!s.ownedLines.includes('line_basic')) s.ownedLines.unshift('line_basic');
     s.stats = Object.assign({ caught: 0, biggest: 0, junk: 0, explosions: 0, pantsAttempts: 0 }, s.stats || {});
     s.discovered = s.discovered || {};
+    s.wearing = s.wearing || {};
     s.equipped = s.equipped || { rod: 'rod_bamboo', line: 'line_basic', bait: 'bait_worm' };
   }
 
@@ -106,7 +107,7 @@
     S.addItem(id, n);
     sfx('coin');
     toast('Đã mua ' + it.name + (n > 1 ? ' ×' + n : '') + ' (−' + fmt(cost) + ')', 'good');
-    if (it.type === 'rod') toast('Nhấn R để đổi sang ' + it.name + '.', 'info');
+    if (it.type === 'rod') toast('Mở túi đồ (Tab) để đổi sang ' + it.name + '.', 'info');
     if (it.type === 'boat') toast('Ra bờ nước rồi nói chuyện với anh cho thuê thuyền để lên ' + it.name + '.', 'info');
     emit('money:changed', {});
     return true;
@@ -292,6 +293,30 @@
   };
   S.cook = (i) => S.cookFish(i);
 
+  // ---- Mặc đồ câu được (giày, dép, áo, quần, sịp, nón...) ----
+  const SLOT_NAMES = { head: 'đầu', body: 'áo', legs: 'quần', feet: 'chân', undies: 'sịp', chest: 'ngực' };
+  S.wear = function (id) {
+    const it = D().item(id), s = st();
+    if (!it || !it.wear) return false;
+    if (!S.has(id)) { toast('Không có ' + it.name + ' để mặc.', 'warn'); return false; }
+    const old = s.wearing[it.wear];
+    if (old) S.addItem(old, 1);
+    S.removeItem(id, 1);
+    s.wearing[it.wear] = id;
+    toast('Đã mặc ' + it.name + (it.wear === 'undies' ? ' — ra ngoài quần, chuẩn siêu nhân!' : '!'), 'good');
+    emit('outfit:changed', {}); emit('inventory:changed', {});
+    return true;
+  };
+  S.unwear = function (slot) {
+    const s = st(), id = s.wearing[slot];
+    if (!id) return false;
+    delete s.wearing[slot];
+    S.addItem(id, 1);
+    toast('Đã cởi ' + itemName(id) + ' (' + (SLOT_NAMES[slot] || slot) + ').', 'info');
+    emit('outfit:changed', {}); emit('inventory:changed', {});
+    return true;
+  };
+
   S.travel = function (envId) {
     const env = D().ENVS.find((e) => e.id === envId);
     const s = st();
@@ -350,7 +375,7 @@
       } else {
         s.fishBag.push({ speciesId: c.id, id: c.id, name: c.name, weight: c.weight || 0, value, category: cat });
         const epic = EPIC_CATS.indexOf(cat) >= 0;
-        toast('Câu được ' + c.name + ' ' + U.fmtWeight(c.weight || 0) + ' — trị giá ' + fmt(value) + '!', epic ? 'epic' : 'good');
+        toast('Câu được ' + c.name + ' ' + U.fmtWeight(c.weight || 0) + ' (' + fmt(value) + ') → vào giỏ cá ' + s.fishBag.length + '/' + BAG_CAP + ' · phím Tab', epic ? 'epic' : 'good');
         if (s.fishBag.length >= BAG_CAP) toast('Túi đầy, đi bán cá đi!', 'warn');
       }
     } else if (c.kind === 'junk' || c.kind === 'material') {
@@ -358,7 +383,7 @@
       if (c.kind === 'junk') s.stats.junk++;
       const it = D().item(c.id);
       const funny = c.kind === 'junk' ? U.pick(['Lại rác...', 'Ai vứt cái này xuống đây?', 'Câu cá ra ' + (it ? it.name.toLowerCase() : 'rác') + '. Tuyệt.', 'Bảo vệ môi trường +1!']) : 'Nguyên liệu chế tạo!';
-      toast((it && it.icon ? it.icon + ' ' : '') + 'Kéo lên: ' + (c.name || itemName(c.id)) + '. ' + funny, c.id === 'junk_chest' ? 'epic' : 'info');
+      toast('Kéo lên: ' + (c.name || itemName(c.id)) + '. ' + funny + ' → cất vào túi đồ · phím Tab' + (it && it.wear ? ' (mặc được!)' : ''), c.id === 'junk_chest' ? 'epic' : 'info');
     }
     if (c.bonusItems && c.bonusItems.length) {
       c.bonusItems.forEach((b) => {
@@ -504,6 +529,12 @@
     return g;
   }
 
+  // gộp mesh tĩnh của từng bộ phận cứng (thân, đầu, mỗi tay/chân): ~35 → ~15 draw call mỗi người
+  function mergePerson(p) {
+    const P = p.userData.parts; if (!P || !U.mergeStatic) return;
+    U.mergeStatic(p, [P.legL, P.legR, P.armL, P.armR, P.head, P.torso]);
+    [P.legL, P.legR, P.armL, P.armR, P.head].forEach((g) => U.mergeStatic(g));
+  }
   function animatePerson(p, t, phase, speed) {
     const P = p.userData.parts;
     if (!P) return;
@@ -751,6 +782,7 @@
     if (role === 'banhmi') person.position.set(-1.0, 0, 0.2);
     root.add(person);
     if (PROPS[role]) { try { PROPS[role](root, person); } catch (e) { console.warn('[systems] props', role, e); } }
+    mergePerson(person); U.mergeStatic(root, [person]); // quầy hàng + đạo cụ tĩnh → vài mesh (ít draw call, cả bóng đổ)
     const label = makeLabel(def.name, '#ffe082');
     label.position.set(person.position.x, 2.3, person.position.z);
     root.add(label);
@@ -943,6 +975,7 @@
     const label = makeLabel(wardenTitle(), '#a5d6a7'); p.add(label);
     const mEx = makeMarker('!', '#ff3b30'); p.add(mEx);
     const mQ = makeMarker('?', '#ffd54f'); p.add(mQ);
+    mergePerson(p); // đèn pin, chùm sáng đang ẩn → không bị gộp, vẫn bật/tắt được
     return { obj: p, zone, target: null, wait: U.rand(0, 2), speed: 0, phase: Math.random() * 6, beam, lens, label, mEx, mQ, suspicion: 0, home: null };
   }
 
@@ -1331,11 +1364,11 @@
   // ======================================================================
   // 8. LƯU / TẢI
   // ======================================================================
-  const SAVE_FIELDS = ['money', 'inventory', 'fishBag', 'equipped', 'env', 'time', 'day', 'drunk', 'hunger', 'stamina', 'hp', 'ownedBoats', 'ownedRods', 'ownedLines', 'stats', 'discovered', 'buffs'];
+  const SAVE_FIELDS = ['money', 'inventory', 'fishBag', 'equipped', 'env', 'time', 'day', 'drunk', 'hunger', 'stamina', 'hp', 'ownedBoats', 'ownedRods', 'ownedLines', 'stats', 'discovered', 'buffs', 'wearing', 'firstPerson', 'skillXp'];
   S.save = function () {
     try {
       const s = st();
-      const o = { v: 1, savedAt: Date.now() };
+      const o = { v: 2, savedAt: Date.now() };
       SAVE_FIELDS.forEach((k) => { if (s[k] !== undefined) o[k] = s[k]; });
       localStorage.setItem(SAVE_KEY, JSON.stringify(o));
       return true;
@@ -1351,9 +1384,25 @@
       const s = G.state;
       Object.keys(s).forEach((k) => delete s[k]);
       Object.assign(s, def);
-      SAVE_FIELDS.forEach((k) => { if (o[k] !== undefined && o[k] !== null) s[k] = o[k]; });
-      s.stats = Object.assign(def.stats, o.stats || {});
-      s.equipped = Object.assign(def.equipped, o.equipped || {});
+      // chỉ nhận giá trị đúng kiểu với mặc định (bản lưu hỏng / bị sửa tay không làm tiền thành NaN, túi đồ thành số...)
+      const kind = (v) => (Array.isArray(v) ? 'array' : v === null ? 'null' : typeof v);
+      SAVE_FIELDS.forEach((k) => {
+        const v = o[k]; if (v === undefined || v === null) return;
+        const dk = def[k] === undefined ? null : kind(def[k]);
+        if (dk && kind(v) !== dk) return;
+        if (typeof v === 'number' && !Number.isFinite(v)) return;
+        s[k] = v;
+      });
+      if (!Array.isArray(s.fishBag)) s.fishBag = [];
+      s.fishBag = s.fishBag.filter((f) => f && typeof f === 'object' && Number.isFinite(f.weight));
+      for (const id in s.inventory) { const n = s.inventory[id]; if (!Number.isFinite(n) || n <= 0) delete s.inventory[id]; }
+      ['ownedRods', 'ownedLines', 'ownedBoats'].forEach((k) => { if (Array.isArray(s[k])) s[k] = s[k].filter((id) => typeof id === 'string' && D().item && D().item(id)); });
+      s.money = Math.max(0, Math.round(s.money));
+      s.hunger = U.clamp(s.hunger, 0, 100); s.stamina = U.clamp(s.stamina, 0, 100); s.hp = U.clamp(s.hp, 0, 100); s.drunk = U.clamp(s.drunk, 0, 1);
+      s.time = ((s.time % 24) + 24) % 24;
+      if (!(o.v >= 2)) s.firstPerson = true; // save cũ (mặc định cũ là góc thứ ba) → theo mặc định mới
+      s.stats = Object.assign(def.stats, o.stats && typeof o.stats === 'object' ? o.stats : {});
+      s.equipped = Object.assign(def.equipped, o.equipped && typeof o.equipped === 'object' ? o.equipped : {});
       s.mode = 'explore'; s.onBoat = null; s.wanted = 0;
       if (!(s.hp > 0)) s.hp = 50;
       if (!D().ENVS.some((e) => e.id === s.env)) s.env = 'forest';
@@ -1376,7 +1425,7 @@
     if (G.world && G.world.loadEnvironment) G.world.loadEnvironment('forest');
     toSpawn();
     toast('Đã chơi lại từ đầu. Cần tre, 50 nghìn, và một giấc mơ.', 'info');
-    emit('inventory:changed', {}); emit('money:changed', {});
+    emit('inventory:changed', {}); emit('money:changed', {}); emit('outfit:changed', {});
   };
 
   // ======================================================================
@@ -1420,7 +1469,6 @@
     if (!inp.blocked && s.mode !== 'menu' && s.mode !== 'dead') {
       // trên thuyền phím E là lên bờ (player.js) — chỉ nói chuyện khi đang đi bộ
       if (inp.pressed('KeyE') && s.mode === 'explore' && S._nearestNPCObj) talk(S._nearestNPCObj);
-      if (inp.pressed('KeyP')) S.tryPantsFish();
       for (let i = 0; i < 5; i++) {
         if (inp.pressed('Digit' + (i + 1)) && S.hotbar[i]) S.use(S.hotbar[i]);
       }

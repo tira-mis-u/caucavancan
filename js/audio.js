@@ -506,12 +506,12 @@
   }
   function toggleMute() {
     setMuted(!muted);
-    if (G.ui && G.ui.toast) G.ui.toast(muted ? '🔇 Đã tắt tiếng (N)' : '🔊 Đã bật tiếng (N)', 'info');
+    if (G.ui && G.ui.toast) G.ui.toast(muted ? 'Đã tắt tiếng' : 'Đã bật tiếng', 'info');
     return muted;
   }
 
   window.addEventListener('keydown', (e) => {
-    if (e.code === 'KeyN' && !e.repeat && !(e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA'))) toggleMute();
+    // tắt/bật tiếng: trong menu Esc (bớt phím tắt)
   });
 
   // Tự cập nhật âm nền theo môi trường / ngày đêm / thời tiết

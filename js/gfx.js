@@ -253,6 +253,9 @@
   const ad = { ema: 16.7, slowT: 0, fastT: 0, cool: 2, ceiling: 1, ceilT: 0, qCool: 0 };
   function adapt(frameMs, realDt) {
     if (frameMs > 250) return; // khựng do tải map/biên dịch shader/chuyển tab — không phải máy yếu
+    // khung dài nhưng game gần như không làm gì → trình duyệt bóp nhịp (cửa sổ bị che/chạy nền), không phải máy yếu
+    const work = G.frameWorkMs || 0;
+    if (frameMs > 25 && work < 12 && work < frameMs * 0.35) frameMs = 16.7;
     ad.ema += (frameMs - ad.ema) * 0.05;
     if (!gfx.adaptive || G.paused || document.hidden) { ad.slowT = ad.fastT = 0; return; }
     ad.cool -= realDt; ad.qCool -= realDt;
@@ -349,7 +352,7 @@
         'draw ' + s.calls + '  tri ' + (s.tris / 1000).toFixed(0) + 'k\n' +
         'chất lượng ' + P.label + '  px ' + pr.toFixed(2) + (prMax > prMin ? ' [' + prMin.toFixed(2) + '–' + prMax.toFixed(2) + ']' : '') + '\n' +
         'đèn ' + lit + '/' + pool.length + ' (' + vlights.length + ' ảo)  ' + (composer ? (bloomPass ? 'bloom' : 'post') + (hdrTarget ? ' hdr' : '') : 'thường') + '\n' +
-        'F3 ẩn · F4 đổi chất lượng';
+        'F3 ẩn · đổi chất lượng trong menu Esc';
     }
   }
 
@@ -360,6 +363,8 @@
   gfx.render = function (dt) {
     const r = renderer || G.renderer;
     if (!r) return;
+    // cửa sổ thu nhỏ / khung ẩn → canvas 0×0: vẽ vào đó chỉ sinh lỗi WebGL "framebuffer incomplete"
+    if (!window.innerWidth || !window.innerHeight) { lastNow = 0; return; }
     const now = performance.now();
     const realDt = lastNow ? Math.min((now - lastNow) / 1000, 0.5) : 1 / 60;
     lastNow = now;
@@ -394,13 +399,11 @@
     window.addEventListener('keydown', (e) => {
       if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
       if (e.code === 'F3') { e.preventDefault(); gfx.toggleStats(); }
-      else if (e.code === 'F4') {
-        e.preventDefault();
-        const q2 = gfx.cycleQuality();
-        G.ui && G.ui.toast && G.ui.toast('Đồ họa: ' + PRESETS[q2].label + ' (mật độ cây cỏ áp dụng khi đổi bản đồ)', 'info');
-      }
     });
     // sau khi world tạo mặt trời → áp shadow map theo preset
-    G.bus && G.bus.on('env:changed', () => { if (!gfx._shadowApplied) { gfx._shadowApplied = true; applyShadows(PRESETS[gfx.quality]); } });
+    G.bus && G.bus.on('env:changed', () => {
+      if (!gfx._shadowApplied) { gfx._shadowApplied = true; applyShadows(PRESETS[gfx.quality]); }
+      ad.cool = Math.max(ad.cool, 3); ad.slowT = 0; ad.ema = 16.7; // vài khung sau khi dựng map không phản ánh sức máy
+    });
   };
 })();

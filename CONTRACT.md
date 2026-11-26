@@ -102,7 +102,7 @@ Game chạy trong trình duyệt, mở trực tiếp `index.html` (file://) ho�
 ### G.fishing (fishing.js)
 - Phím F: cầm/cất cần (mode 'fishing'). Cần gắn vào `G.player.hand`, model theo loại cần (spin/vertical/horizontal/pole/...).
 - Quăng: giữ chuột trái → thanh lực dao động (càng mạnh càng khó trúng, lệch hướng), nhả → quăng. Hướng = hướng camera. Có gió/độ say làm lệch. Dây (line) vẽ bằng curve/catenary, phao (bobber) nổi theo `getWaterHeight`.
-- Mồi: phím B mở chọn mồi (UI gọi `G.fishing.setBait(id)`), phím R đổi cần (`G.fishing.setRod(id)`), chỉnh độ sâu thả mồi bằng lăn chuột khi phao đã xuống (`G.fishing.depth`).
+- Mồi/cần: đổi trong túi đồ (Tab) hoặc bấm khối trang bị trên HUD (UI gọi `G.fishing.setBait(id)` / `G.fishing.setRod(id)`), chỉnh độ sâu thả mồi bằng lăn chuột khi phao đã xuống (`G.fishing.depth`).
 - Kỹ thuật: 'spin' (cuộn đều, giật nhẹ — giữ chuột trái cuộn mồi giả về), 'vertical' (thả thẳng, nhấp nhấp — W/S), 'float' (phao chờ cá cắn). Mỗi loài thích kỹ thuật khác nhau (dùng `species.behavior` & `baits`).
 - Cá cắn: phao chìm/rung + âm thanh; người chơi phải nhấn Space đúng cửa sổ thời gian (cá khó → cửa sổ ngắn) để giật câu.
 - Vật cá (mode 'fight'): `tension` 0..1 (quá 1 đứt dây theo `line.strength`), `fishStamina`, `distance`. Chuột trái = cuộn, A/D = nghiêng cần ngược hướng cá chạy (đúng thì giảm tension, tăng sát thương), W = giật cần (pump). Cá behavior khác nhau: runner chạy xa, diver lặn sâu, jumper nhảy khỏi nước (nhấn S hạ cần khi cá nhảy), puller lôi mạnh; nếu `strength` cá vượt quá sức người (tension cực đại lâu + stamina người cạn) → emit `player:dragged`. Cá behavior 'fighter' khi gần bờ → emit `combat:start`.
@@ -114,7 +114,7 @@ Game chạy trong trình duyệt, mở trực tiếp `index.html` (file://) ho�
 - Túi đồ, tiền, bán cá (`sellAll()`), mua đồ (`buy(id)`), chế tạo (`craft(recipeId)` theo `G.data.RECIPES`), dùng đồ (`use(id)`: rượu → tăng drunk, hồi stamina, bánh mì pate 15k → hồi hunger/hp).
 - NPC 3D tại `G.world.getNPCSpots()` (dựng lại khi `env:changed`): người bán đồ câu, quán rượu, cô bán bánh mì pate, thợ rèn/chế tạo, người cho thuê/đóng thuyền, ông lão kể chuyện (gợi ý cá). Nhấn E khi đứng gần → `G.ui.dialog(...)`.
 - Quản lý (warden): NPC tuần tra trong `G.world.zones`. Nếu người chơi câu (mode fishing/fight) trong zone và trong tầm nhìn → `wanted` tăng → emit `warden:spotted` rồi `warden:chase` (warden chạy đuổi). Người chơi chạy ra khỏi tầm > 40m vài giây → `warden:escaped`. Bị bắt → `warden:caught`: tịch thu cần đang dùng + cá trong túi + một phần tiền, đưa về spawn.
-- Luật "không được nhét cá vào quần": phím P (hoặc nút UI "Nhét cá vào quần") → luôn bị từ chối với thông báo hài hước khác nhau; nếu cố lặp lại 3 lần → warden xuất hiện phạt tiền.
+- Luật "không được nhét cá vào quần": nút UI "Nhét cá vào quần" (không có phím riêng) → luôn bị từ chối với thông báo hài hước khác nhau; nếu cố lặp lại 3 lần → warden xuất hiện phạt tiền.
 - Năng lượng: hunger giảm dần, stamina giảm khi chạy/vật cá, hồi khi nghỉ. Hunger 0 → mất HP dần. HP 0 → ngất, mất ít tiền, hồi sinh tại spawn.
 - Lưu/tải `localStorage` (try/catch), tự lưu mỗi 30s.
 - `G.systems.nearestNPC` cho UI hiển thị gợi ý "[E] Nói chuyện".
@@ -136,13 +136,14 @@ Game chạy trong trình duyệt, mở trực tiếp `index.html` (file://) ho�
 - Thanh lực quăng: `setCastMeter(v|null, sweetSpot)`; cửa sổ giật câu: `setStrikePrompt(on, progress)`; bảng vật cá đọc `G.fishing.fight` mỗi frame (thanh tension, thể lực cá, khoảng cách, mũi tên hướng cá chạy, gợi ý phím).
 - Bản đồ (M): chọn môi trường → `G.world.loadEnvironment(id)` (máy bay cần vé — xem data).
 - Panel cửa hàng/chế tạo/túi đồ gọi `G.systems.buy/craft/use/sellAll`.
-- Fishdex (phím K): danh sách loài, ẩn tên nếu chưa bắt.
+- Fishdex (mở từ menu Esc hoặc nút trên HUD): danh sách loài, ẩn tên nếu chưa bắt.
 - Crosshair cho mode 'shoot'; HP bar cá cho mode 'combat' (đọc `G.player.combat` = `{fishHp, fishMaxHp, name}`).
-- Phím: I túi đồ, C chế tạo, M bản đồ, K fishdex, H/F1 trợ giúp, Esc tạm dừng/đóng panel. Khi panel mở → `G.input.blocked = true`, `G.setMode` không đổi.
+- Phím: Tab/I túi đồ, M bản đồ, F1 trợ giúp, Esc tạm dừng/đóng panel (sách cá, đồ họa, âm thanh nằm trong menu Esc). Chế tạo chỉ ở Thợ rèn (NPC). Khi panel mở → `G.input.blocked = true`, `G.setMode` không đổi.
 - Tooltip "[E] ..." khi `G.systems.nearestNPC`.
 
 ## Bảng phím tổng
-WASD di chuyển · Shift chạy/né · Space nhảy / giật câu · Chuột phải kéo: xoay camera · Lăn chuột: zoom / độ sâu mồi · F cầm cần · Chuột trái giữ: quăng / cuộn · A/D nghiêng cần khi vật · W giật cần · S hạ cần · R đổi cần · B đổi mồi · E tương tác · G chế độ bắn cá · I túi · C chế tạo · M bản đồ · K sách cá · P nhét cá vào quần (bị cấm) · 1-5 dùng nhanh đồ ăn/uống · H trợ giúp · Esc.
+**Giữ ít phím, quen tay như game PC — KHÔNG thêm phím mới.**
+WASD di chuyển · Shift chạy/né · Space nhảy / giật câu · Chuột trái: quăng / cuộn / đánh / bắn · Chuột phải kéo: xoay camera · Lăn chuột: zoom, lăn sát vào = góc nhìn thứ nhất, lăn ra = góc thứ ba; khi thả dây = độ sâu mồi · F cầm cần · E tương tác · A/D ghì cần khi vật · W giật cần · S hạ cần · Q/E/R skill (chỉ khi vật/đánh) · G bắn cá · Tab/I túi · M bản đồ · 1-5 ăn uống nhanh · Esc menu · F1 trợ giúp · F3 bảng hiệu năng.
 
 ## Bổ sung quan trọng
 - Sở hữu đồ: cần câu trong `G.state.ownedRods` (mảng id), dây trong `G.state.ownedLines`, thuyền trong `G.state.ownedBoats`. Mồi/đồ ăn/nguyên liệu/rác trong `G.state.inventory {id: count}`. Mồi `reusable` không bị trừ khi dùng; mồi thường bị trừ 1 mỗi lần cá cắn câu (hooked).
@@ -172,5 +173,28 @@ Skill dùng trong project nằm ở `.claude/skills/` (xem SOURCES.md). Giữ **
 - `Rope` (dây verlet): `new G.physics.Rope(segments, length)`, `.update(dt, startVec3, endVec3, opts)`, `.points`.
 - `buoyancy(obj, opts)` helper cho vật nổi (phao, thuyền, cá nổi).
 - Bước vật lý cố định 1/60s có nội suy cho chuyển động người chơi/thuyền.
-- Đã triển khai thêm (ngoài danh sách trên): `G.physics.move/floorAt/overlaps/makeStepper/solveLaunch/lastNormal`; `G.gfx.addLight/clearLights` (pool đèn điểm giới hạn theo chất lượng), `G.world.sun`; phím F3 = bảng hiệu năng, F4 = đổi mức chất lượng.
+- Đã triển khai thêm (ngoài danh sách trên): `G.physics.move/floorAt/overlaps/makeStepper/solveLaunch/lastNormal`; `G.gfx.addLight/clearLights` (pool đèn điểm giới hạn theo chất lượng), `G.world.sun`; phím F3 = bảng hiệu năng (đổi mức chất lượng trong menu Esc).
 - Vật cá: sau 90s vật nhau cá mất sức nhanh dần (trận nào cũng có hồi kết); đứng trên thuyền giảm dây bị rút theo độ vững thuyền; tàu thép không bao giờ bị kéo xuống nước.
+
+## Cập nhật v3 (cá vạn cân, skill, góc nhìn thứ nhất, mặc đồ)
+- `G.skills` (js/skills.js): skill người chơi Q/E/R chỉ trong mode `fight`/`combat`; `isActive(id)`, `list(ctx)`, `cast(id)`, sự kiện `skill:cast {id, ctx, def}`. Chiêu cá: `fishSkillsFor(species)`, `auraColor(species)` (theo nhóm: to, khong_lo, quai_vat, dot_bien, meme).
+- `G.fx.aura(obj, color, giây|Infinity, cỡ)` → `{stop(), flare(giây)}`; `G.fx.lightning(pos)`. Pool cố định để G.prewarm biên dịch sẵn.
+- `G.slowMo(scale, giâyThật)` — slow motion kiểu phim (`G.timeScale`).
+- Lật thuyền: fishing phát `fight:end {result:'capsized'}` + `boat:capsize`; player.js lật mô hình thuyền và hất người xuống nước. Sức chở ≈ 150 + 3500·stability³ kg; tàu thép không lật; Thần Lực Ghì Cần (Q) chống lật.
+- Mặc đồ: `G.state.wearing = {head, body, legs, feet, undies, chest}`; `G.systems.wear(id)`, `unwear(slot)`, sự kiện `outfit:changed`; đồ mặc được có `wear`/`wearDesc` trong `G.data.JUNK`.
+- Góc nhìn thứ nhất: lăn chuột sát vào (lăn ra để về góc thứ ba), `G.state.firstPerson` (được lưu). Không dùng phím riêng.
+
+## Cập nhật v4
+- **Mặc định góc nhìn thứ nhất** (`firstPerson: true` trong `G.defaultState`). Bản lưu `v < 2` được chuyển sang góc nhìn thứ nhất một lần; bản lưu mới ghi `v: 2`. Lăn chuột ra = góc thứ ba. Cú click để khóa chuột không lọt xuống gameplay.
+- Sịp hoa (`junk_undies`) là **sịp tam giác** (không có ống) — `briefsGeometry()` trong player.js, mô hình rơi/câu lên trong fish.js.
+- `G.util.mergeStatic(root, skip, cache?)`: gộp mesh tĩnh theo vật liệu để giảm draw call (NPC, quầy hàng, mô hình cá). Bộ phận chuyển động phải nằm trong `skip`. Mô hình cá dùng cache geometry theo loài (không dispose).
+- `G.disposeObject` giải phóng cả texture trong `material.uniforms` (ShaderMaterial).
+- Hiệu ứng rảnh (aura, vòng skill, cột sáng, tia điện) phải `visible = false`, không chỉ opacity 0.
+- **Đồ họa cá**: mỗi loài có da vẽ canvas riêng trong `SKIN` (fish.js) — màu lưng/hông/bụng + hoa văn thật của loài (`PAT`: bars, band, spots, whale, scales, mottle, chevron, reticulate, iris, patches, plates, feathers, runes) và vây có tia + màu mép riêng (`fin.rainbow` cho đuôi sặc sỡ). Loài mới PHẢI có mục `SKIN`, không để 2 loài chỉ khác màu. Cá boss dùng thêm `spikes`, `horns`, `glow` (emissiveMap), `crown`, `halo`.
+- **Sách cá / túi đồ / bảng vật cá** dùng `G.fish.portrait(id)` (ảnh chụp mô hình 3D, cache, chụp nền sau `game:ready`); chưa câu = bóng đen đúng dáng. Khung ảnh có nền riêng theo nhóm quai_vat / khong_lo / dot_bien / meme.
+- **Kích thước cá to**: mô hình khi vật, khi kéo lên và khi đánh trên bờ dùng chiều dài thật `lengthFromWeight` (đánh trên bờ tối đa 7m). Cá bơi nền thường ≤1,3m; mỗi map có biển/hồ sâu thả thêm 1–2 con khổng lồ/quái vật 2,5–5m ở nước sâu >3m (`minD`). Ảnh sách cá thì cùng cỡ — trong game cá boss phải to hơn ảnh.
+- Biển sâu (đảo/máy bay) có thêm: Cá mái chèo khổng lồ, Cá mặt trăng, Cá nhám phơi nắng, Cá cần câu vực thẳm (`lure`, `fangs`), Megalodon, Hải Long Vực Thẳm (dragon xanh). Cá hàng chục tấn đứng trên bờ: không dùng kỹ năng thì bị kéo xuống nước; Thần Lực Ghì Cần (Q) vừa chặn bị kéo vừa không mất sức (hồi 2/giây), kết hợp rượu (phím 1–5) thì thắng được. Tàu thép thì không bao giờ bị kéo.
+- Vây bụng riêng theo loài: `aR`, `aH`, `aStyle` trong model (cá mặt trăng). Mọi loài (kể cả cá đuối, mực khổng lồ) đều có mục `SKIN`; riêng Cá Cá là đàn cá nhỏ nhiều màu (InstancedMesh). `G.util.mergeStatic` giữ nguyên vertex color khi gộp.
+- `G.systems.load` chỉ nhận giá trị đúng kiểu với `G.defaultState()` (bản lưu hỏng không làm tiền NaN).
+- `G.player.basket` — giỏ tre bên hông; cá/đồ câu được bay vào giỏ khi kéo lên.
+- `G.prewarm()` làm nóng cả vật đang ẩn + shader bóng đổ; `G.frameWorkMs` = thời gian xử lý thật của khung (để không nhầm trình duyệt bóp nhịp là máy yếu).

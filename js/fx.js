@@ -485,6 +485,218 @@
     }
   }
 
+  // ---------- Hào quang (skill) & sét ----------
+  // Pool cố định trong scene (opacity 0 khi rảnh) → G.prewarm biên dịch sẵn, không tạo vật mới giữa trận.
+  const AURA_N = 6, auras = [];
+  let auraGroup = null, boltLine = null, boltT = 0;
+  const _ap = new THREE.Vector3();
+  function makeAuraPool() {
+    if (auraGroup) return;
+    const cv = document.createElement('canvas'); cv.width = cv.height = 64;
+    const g = cv.getContext('2d'), gr = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+    gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(0.35, 'rgba(255,255,255,0.45)'); gr.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = gr; g.fillRect(0, 0, 64, 64);
+    const tex = new THREE.CanvasTexture(cv);
+    const ringGeo = new THREE.RingGeometry(0.82, 1, 40);
+    auraGroup = new THREE.Group(); auraGroup.name = 'fxAuras';
+    for (let i = 0; i < AURA_N; i++) {
+      const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false }));
+      const ring = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
+      ring.rotation.x = -Math.PI / 2;
+      sprite.scale.setScalar(0.001); ring.scale.setScalar(0.001);
+      auraGroup.add(sprite, ring);
+      auras.push({ sprite, ring, target: null, t: 0, dur: 0, size: 1, flare: 0, sparkT: 0, color: new THREE.Color() });
+    }
+    const pts = new Float32Array(14 * 3);
+    const bg = new THREE.BufferGeometry(); bg.setAttribute('position', new THREE.BufferAttribute(pts, 3).setUsage(THREE.DynamicDrawUsage));
+    boltLine = new THREE.Line(bg, new THREE.LineBasicMaterial({ color: 0xcfeeff, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false }));
+    boltLine.frustumCulled = false;
+    // chữ bay mẫu (ẩn) cùng cấu hình vật liệu với floatText → G.prewarm biên dịch sẵn shader của nó
+    const ftTex = new THREE.CanvasTexture(cv); ftTex.encoding = THREE.sRGBEncoding; // giống floatText (mã hóa khác = shader khác)
+    const ft = new THREE.Sprite(new THREE.SpriteMaterial({ map: ftTex, transparent: true, depthTest: false, depthWrite: false, fog: false }));
+    ft.visible = false; auraGroup.add(ft);
+  }
+  // aura(vật, màu, giây (Infinity = tới khi stop), cỡ) → { stop(), flare(giây) }
+  function aura(target, color, dur, size) {
+    makeAuraPool();
+    let a = auras.find((x) => !x.target) || auras.reduce((o, x) => (x.t > o.t ? x : o), auras[0]);
+    Object.assign(a, { target, t: 0, dur: dur == null ? 3 : dur, size: size || 1, flare: 0.4, sparkT: 0 });
+    a.color.setHex(color == null ? 0xffffff : color);
+    a.sprite.material.color.copy(a.color); a.ring.material.color.copy(a.color);
+    return { stop() { if (a.target === target) a.target = null; }, flare(sec) { if (a.target === target) a.flare = sec || 1; } };
+  }
+  function lightning(pos) {
+    makeAuraPool();
+    const p = boltLine.geometry.attributes.position, n = p.count, top = 28;
+    for (let i = 0; i < n; i++) {
+      const u = i / (n - 1), j = i === 0 || i === n - 1 ? 0 : (1 - u * 0.5) * 1.6;
+      p.setXYZ(i, pos.x + R(-j, j), pos.y + top * (1 - u), pos.z + R(-j, j));
+    }
+    p.needsUpdate = true;
+    boltT = 0.35;
+    screenFlash(0.35, '#cfeeff');
+    if (flashLight) { flashLight.position.copy(pos); flashLight.distance = 60; flashI = Math.max(flashI, 2); flashLight.color.setHex(0xbfe6ff); }
+    sparkle(pos.clone(), 0xbfe6ff);
+    shake(0.3, 0.3);
+  }
+  function updateAuras(dt, t) {
+    if (!auraGroup) return;
+    for (const a of auras) {
+      const S = a.sprite, Rg = a.ring;
+      if (!a.target) { S.material.opacity = Rg.material.opacity = 0; S.scale.setScalar(0.001); Rg.scale.setScalar(0.001); continue; }
+      a.t += dt; a.flare = Math.max(0, a.flare - dt);
+      const tg = a.target;
+      if ((a.dur !== Infinity && a.t > a.dur) || !tg.parent) { a.target = null; continue; }
+      const vis = tg.visible !== false;
+      tg.getWorldPosition(_ap);
+      const fade = Math.min(1, a.t * 4) * (a.dur === Infinity ? 1 : Math.min(1, (a.dur - a.t) * 2));
+      const boost = 1 + a.flare * 1.5;
+      S.position.set(_ap.x, _ap.y + a.size * 0.6, _ap.z);
+      S.scale.setScalar(a.size * 2.4 * (1 + 0.1 * Math.sin(t * 7)) * (1 + a.flare * 0.6));
+      S.material.opacity = vis ? 0.42 * fade * boost : 0;
+      const ph = (a.t * 1.4) % 1;
+      Rg.position.set(_ap.x, _ap.y + 0.05, _ap.z);
+      Rg.scale.setScalar(a.size * (0.6 + 1.4 * ph));
+      Rg.material.opacity = vis ? 0.55 * (1 - ph) * fade * boost : 0;
+      a.sparkT -= dt;
+      if (vis && a.sparkT <= 0) { // hạt sáng bay lên — ít, rẻ
+        a.sparkT = a.flare > 0 ? 0.03 : 0.09;
+        const r = a.size * 0.7, th = R(0, Math.PI * 2);
+        emit(pools.add, { x: _ap.x + Math.cos(th) * r, y: _ap.y + R(0, a.size), z: _ap.z + Math.sin(th) * r, vx: 0, vy: R(1.5, 3.5), vz: 0, life: R(0.5, 0.9), size: R(0.08, 0.16) * Math.max(1, a.size * 0.5), color: a.color.getHex(), alpha: 0.9, gravity: 0, drag: 1 });
+      }
+    }
+    if (boltT > 0) { boltT -= dt; boltLine.material.opacity = Math.max(0, boltT / 0.35) * (Math.sin(t * 90) > -0.3 ? 1 : 0.2); }
+    else boltLine.material.opacity = 0;
+    // opacity 0 vẫn tốn 1 draw call/vật → ẩn hẳn khi rảnh (G.prewarm vẫn biên dịch được vật ẩn)
+    for (const a of auras) { a.sprite.visible = a.sprite.material.opacity > 0.002; a.ring.visible = a.ring.material.opacity > 0.002; }
+    boltLine.visible = boltT > 0;
+  }
+
+  // ---------- Hiệu ứng skill: vòng cảnh báo, sóng xung kích, xoáy nước, cột sáng, rồng nước, mây độc, lửa, tia điện ----------
+  // Pool cố định (opacity 0 khi rảnh) → không tạo vật mới giữa trận, G.prewarm biên dịch sẵn.
+  const DECAL_N = 8, PILLAR_N = 3, decals = [], pillars = [];
+  let skillGroup = null, arcLine = null, arcT = 0;
+  function canvasTex(size, draw) { const c = document.createElement('canvas'); c.width = c.height = size; draw(c.getContext('2d'), size); return new THREE.CanvasTexture(c); }
+  function makeSkillPool() {
+    if (skillGroup) return;
+    skillGroup = new THREE.Group(); skillGroup.name = 'fxSkills';
+    const ringTex = canvasTex(128, (g, n) => { // vòng cảnh báo: viền đậm + nền mờ
+      g.clearRect(0, 0, n, n); g.lineWidth = 7; g.strokeStyle = '#fff'; g.beginPath(); g.arc(64, 64, 58, 0, 6.283); g.stroke();
+      g.fillStyle = 'rgba(255,255,255,0.16)'; g.beginPath(); g.arc(64, 64, 55, 0, 6.283); g.fill();
+    });
+    const spiralTex = canvasTex(128, (g) => { // xoáy nước: 3 nhánh xoắn ốc
+      g.lineCap = 'round';
+      for (let a = 0; a < 3; a++) for (let k = 0; k < 60; k++) {
+        const t = k / 60, r = 4 + t * 58, th = a * 2.094 + t * 7;
+        g.strokeStyle = 'rgba(255,255,255,' + (0.85 * (1 - t * 0.6)) + ')'; g.lineWidth = 2 + t * 6;
+        g.beginPath(); g.arc(64 + Math.cos(th) * r, 64 + Math.sin(th) * r, 1, 0, 6.283); g.stroke();
+      }
+    });
+    const pillarTex = canvasTex(64, (g, n) => { const gr = g.createLinearGradient(0, n, 0, 0); gr.addColorStop(0, 'rgba(255,255,255,0.95)'); gr.addColorStop(0.6, 'rgba(255,255,255,0.35)'); gr.addColorStop(1, 'rgba(255,255,255,0)'); g.fillStyle = gr; g.fillRect(0, 0, n, n); });
+    const discGeo = new THREE.CircleGeometry(1, 40); discGeo.rotateX(-Math.PI / 2);
+    const planeGeo = new THREE.PlaneGeometry(2, 2); planeGeo.rotateX(-Math.PI / 2);
+    const add = { transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide };
+    for (let i = 0; i < DECAL_N; i++) {
+      const ring = new THREE.Mesh(planeGeo, new THREE.MeshBasicMaterial(Object.assign({ map: ringTex }, add)));
+      const fill = new THREE.Mesh(discGeo, new THREE.MeshBasicMaterial(Object.assign({}, add)));
+      const spiral = new THREE.Mesh(planeGeo, new THREE.MeshBasicMaterial(Object.assign({ map: spiralTex }, add)));
+      [ring, fill, spiral].forEach((m) => { m.scale.setScalar(0.001); m.frustumCulled = false; skillGroup.add(m); });
+      decals.push({ ring, fill, spiral, mode: null, t: 0, dur: 1, r: 1, pos: new THREE.Vector3(), col: new THREE.Color() });
+    }
+    const pGeo = new THREE.CylinderGeometry(1, 1, 1, 24, 1, true); pGeo.translate(0, 0.5, 0);
+    for (let i = 0; i < PILLAR_N; i++) {
+      const m = new THREE.Mesh(pGeo, new THREE.MeshBasicMaterial(Object.assign({ map: pillarTex }, add)));
+      m.scale.setScalar(0.001); m.frustumCulled = false; skillGroup.add(m);
+      pillars.push({ m, t: 0, dur: 0, r: 1, h: 1 });
+    }
+    const ag = new THREE.BufferGeometry(); ag.setAttribute('position', new THREE.BufferAttribute(new Float32Array(32 * 3), 3).setUsage(THREE.DynamicDrawUsage));
+    arcLine = new THREE.Line(ag, new THREE.LineBasicMaterial({ color: 0xbfe8ff, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false }));
+    arcLine.frustumCulled = false; skillGroup.add(arcLine);
+  }
+  function takeDecal() { makeSkillPool(); return decals.find((d) => !d.mode) || decals.reduce((o, d) => (d.t / d.dur > o.t / o.dur ? d : o), decals[0]); }
+  function decal(mode, pos, r, dur, color) {
+    const d = takeDecal(); d.mode = mode; d.t = 0; d.dur = dur; d.r = r; d.pos.copy(pos); d.col.setHex(color);
+    // vòng cảnh báo dùng hòa màu thường (cộng sáng trên nền cát/nước sáng thì mất màu); hiệu ứng khác giữ cộng sáng
+    const bl = mode === 'tele' ? THREE.NormalBlending : THREE.AdditiveBlending;
+    for (const m of [d.ring, d.fill, d.spiral]) { m.material.color.copy(d.col); m.material.blending = bl; }
+    return { stop() { if (d.mode === mode) d.mode = null; }, move(p) { d.pos.copy(p); } };
+  }
+  // vòng cảnh báo: lấp dần trong 'dur' giây (đúng thời gian cá vận chiêu)
+  function telegraph(pos, radius, dur, color) { return decal('tele', pos, radius, dur, color == null ? 0xff3b30 : color); }
+  function shockwave(pos, radius, color) { return decal('wave', pos, radius, 0.7, color == null ? 0xffffff : color); }
+  function whirlpool(pos, radius, dur, color) { return decal('spiral', pos, radius, dur, color == null ? 0x7fd8ff : color); }
+  function pillar(pos, radius, height, dur, color) {
+    makeSkillPool();
+    const p = pillars.find((x) => x.t >= x.dur) || pillars[0];
+    p.t = 0; p.dur = dur; p.r = radius; p.h = height; p.m.position.copy(pos); p.m.material.color.setHex(color == null ? 0xffffff : color);
+  }
+  function waterDragon(pos, scale) {
+    const s = scale || 1;
+    pillar(pos, 1.6 * s, 16 * s, 1.4, 0x7fe0ff);
+    shockwave(pos, 9 * s, 0x9fe8ff); whirlpool(pos, 5 * s, 1.6, 0x5fc8ff);
+    for (let i = 0; i < 70; i++) { // hạt nước xoắn ốc bốc lên thành "thân rồng"
+      const t = i / 70, th = t * 14, r = (0.6 + 1.6 * (1 - t)) * s;
+      emit(pools.add, { x: pos.x + Math.cos(th) * r, y: pos.y + t * 3 * s, z: pos.z + Math.sin(th) * r, vx: -Math.sin(th) * 3 * s, vy: (8 + t * 10) * s, vz: Math.cos(th) * 3 * s, life: R(0.9, 1.4), size: R(0.25, 0.5) * s, sizeEnd: 0.05, color: 0xc8f2ff, colorEnd: 0x3fa8ff, alpha: 0.95, gravity: 6, drag: 0.4 });
+    }
+    splash(pos, 2.5 * s);
+  }
+  function toxicCloud(pos, scale) {
+    const s = scale || 1;
+    for (let i = 0; i < 26; i++) emit(pools.norm, { x: pos.x + R(-1.5, 1.5) * s, y: pos.y + R(0, 1) * s, z: pos.z + R(-1.5, 1.5) * s, vx: R(-0.4, 0.4), vy: R(0.3, 0.9), vz: R(-0.4, 0.4), life: R(1.8, 2.8), size: R(0.8, 1.4) * s, sizeEnd: R(2, 3) * s, color: 0x7dff4a, colorEnd: 0x2a6a1a, alpha: 0.45, drag: 0.5, wobble: 0.8 });
+  }
+  function fireCone(pos, dir, len, color) {
+    const c = color == null ? 0xff8a2a : color;
+    for (let i = 0; i < 46; i++) {
+      const sp = R(0.6, 1) * len * 1.6, a = R(-0.32, 0.32);
+      const dx = dir.x * Math.cos(a) - dir.z * Math.sin(a), dz = dir.x * Math.sin(a) + dir.z * Math.cos(a);
+      emit(pools.add, { x: pos.x, y: pos.y + R(-0.2, 0.3), z: pos.z, vx: dx * sp, vy: R(0, 1.5), vz: dz * sp, life: R(0.45, 0.75), size: R(0.3, 0.6), sizeEnd: R(0.9, 1.4), color: 0xfff0a0, colorEnd: c, alpha: 0.95, drag: 1.6 });
+    }
+  }
+  // tia điện chạy dọc một chuỗi điểm (dây câu) — 'pts' là mảng Vector3
+  function arc(pts) {
+    makeSkillPool();
+    if (!pts || pts.length < 2) return;
+    const a = arcLine.geometry.attributes.position, n = a.count;
+    for (let i = 0; i < n; i++) {
+      const u = i / (n - 1) * (pts.length - 1), k = Math.min(pts.length - 2, Math.floor(u)), f = u - k, p0 = pts[k], p1 = pts[k + 1];
+      const j = i === 0 || i === n - 1 ? 0 : 0.35;
+      a.setXYZ(i, p0.x + (p1.x - p0.x) * f + R(-j, j), p0.y + (p1.y - p0.y) * f + R(-j, j), p0.z + (p1.z - p0.z) * f + R(-j, j));
+    }
+    a.needsUpdate = true; arcT = 0.5;
+  }
+  function updateSkillFx(dt, t) {
+    if (!skillGroup) return;
+    for (const d of decals) {
+      if (!d.mode) { if (d.ring.material.opacity || d.fill.material.opacity || d.spiral.material.opacity) { d.ring.material.opacity = d.fill.material.opacity = d.spiral.material.opacity = 0; d.ring.scale.setScalar(0.001); d.fill.scale.setScalar(0.001); d.spiral.scale.setScalar(0.001); } continue; }
+      d.t += dt; const u = Math.min(1, d.t / d.dur);
+      const y = d.pos.y + 0.07;
+      d.ring.position.set(d.pos.x, y, d.pos.z); d.fill.position.set(d.pos.x, y + 0.01, d.pos.z); d.spiral.position.set(d.pos.x, y + 0.02, d.pos.z);
+      if (d.mode === 'tele') {
+        // nhẹ tay: vòng cộng sáng + bloom trên nền cát dễ thành mảng trắng lóa
+        d.ring.scale.setScalar(d.r); d.ring.material.opacity = 0.75 + 0.2 * Math.sin(t * 14);
+        d.fill.scale.setScalar(Math.max(0.001, d.r * u)); d.fill.material.opacity = 0.22 + 0.18 * u;
+      } else if (d.mode === 'wave') {
+        d.ring.scale.setScalar(Math.max(0.001, d.r * (0.15 + 0.85 * Math.sqrt(u)))); d.ring.material.opacity = 0.9 * (1 - u);
+      } else if (d.mode === 'spiral') {
+        d.spiral.scale.setScalar(d.r); d.spiral.rotation.y += dt * 4;
+        d.spiral.material.opacity = 0.75 * Math.min(1, d.t * 3) * Math.min(1, (d.dur - d.t) * 2);
+      }
+      if (d.t >= d.dur) d.mode = null;
+    }
+    for (const p of pillars) {
+      if (p.t >= p.dur) { if (p.m.material.opacity) { p.m.material.opacity = 0; p.m.scale.setScalar(0.001); } continue; }
+      p.t += dt; const u = p.t / p.dur;
+      p.m.scale.set(p.r * (0.6 + 0.4 * u), p.h * Math.min(1, u * 4), p.r * (0.6 + 0.4 * u));
+      p.m.material.opacity = 0.8 * Math.min(1, u * 5) * (1 - u);
+      p.m.rotation.y += dt * 3;
+    }
+    if (arcT > 0) { arcT -= dt; arcLine.material.opacity = Math.max(0, arcT / 0.5) * (Math.sin(t * 80) > -0.4 ? 1 : 0.15); }
+    else if (arcLine.material.opacity) arcLine.material.opacity = 0;
+    arcLine.visible = arcT > 0;
+    for (const d of decals) { d.ring.visible = d.ring.material.opacity > 0.002; d.fill.visible = d.fill.material.opacity > 0.002; d.spiral.visible = d.spiral.material.opacity > 0.002; }
+    for (const p of pillars) p.m.visible = p.m.material.opacity > 0.002;
+  }
+
   // ---------- Cập nhật mỗi frame ----------
   function ensureInScene() {
     if (!G.scene || !pools) return;
@@ -493,6 +705,11 @@
     makeDebrisMesh(); // có sẵn trong scene (count=0) để G.prewarm biên dịch shader → vụ nổ đầu tiên không khựng
     if (debrisMesh.parent !== G.scene) G.scene.add(debrisMesh);
     if (flashLight && flashLight.isObject3D && flashLight.parent !== G.scene) G.scene.add(flashLight);
+    makeAuraPool();
+    if (auraGroup.parent !== G.scene) G.scene.add(auraGroup);
+    makeSkillPool();
+    if (skillGroup.parent !== G.scene) G.scene.add(skillGroup);
+    if (boltLine.parent !== G.scene) G.scene.add(boltLine);
   }
 
   function restoreCamera() {
@@ -507,6 +724,8 @@
   function update(dt, t) {
     if (!pools) return;
     ensureInScene();
+    updateAuras(dt, t);
+    updateSkillFx(dt, t);
     // timers
     for (let i = timers.length - 1; i >= 0; i--) {
       const tm = timers[i];
@@ -720,7 +939,7 @@
         });
       }
     },
-    splash, ripple, explosion, shake, sparkle, floatText, bubbles, rain, fireworks, confetti,
+    splash, ripple, explosion, shake, sparkle, floatText, bubbles, rain, fireworks, confetti, aura, lightning, telegraph, shockwave, whirlpool, pillar, waterDragon, toxicCloud, fireCone, arc,
     flash: screenFlash, emit(o, additive) { if (pools) emit(additive ? pools.add : pools.norm, o); },
   };
 })();

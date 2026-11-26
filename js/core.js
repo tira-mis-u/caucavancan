@@ -39,6 +39,91 @@
     // Font chuẩn cho chữ vẽ lên canvas (biển hiệu, tên NPC, chữ bay). display=true → font tiêu đề.
     font: (weight, sizePx, display) => (weight || 600) + ' ' + Math.round(sizePx) + 'px ' + (display ? G.FONT_DISPLAY : G.FONT_UI),
   });
+  // Gộp các mesh TĨNH dưới `root` (so với root) thành 1 mesh cho mỗi kiểu vật liệu → ít draw call hơn
+  // (cả lượt vẽ bóng đổ). Không đụng tới: nhánh trong `skip` (bộ phận chuyển động), mesh ẩn,
+  // mesh có userData.noMerge, mảng vật liệu, Sprite/Points/Line/InstancedMesh. Gọi lúc dựng, trước khi vẽ lần đầu.
+  // cache (tùy chọn): { map: Map, key: 'tiền tố' } → geometry gộp được dùng chung giữa các bản sao cùng mẫu
+  // (cá cùng loài): không tạo buffer mới mỗi con, không cần dispose khi con cá biến mất.
+  U.mergeStatic = function (root, skip, cache) {
+    if (!root || typeof THREE === 'undefined') return 0;
+    const skipSet = new Set(skip || []);
+    const groups = new Map(), found = [];
+    (function walk(o) {
+      for (const c of o.children) {
+        if (skipSet.has(c) || !c.visible) continue;
+        if (c.isMesh && !c.isInstancedMesh && !c.isSkinnedMesh && !Array.isArray(c.material) && c.geometry && c.geometry.attributes.position &&
+            !(c.userData && c.userData.noMerge) && !c.children.length) found.push(c);
+        else if (!c.isMesh) walk(c);
+      }
+    })(root);
+    if (found.length < 2) return 0;
+    root.updateMatrixWorld(true);
+    const inv = new THREE.Matrix4().copy(root.matrixWorld).invert();
+    for (const m of found) {
+      const a = m.material, map = a.map ? a.map.uuid : '';
+      const key = [a.type, a.color ? a.color.getHex() : '', a.emissive ? a.emissive.getHex() : '', a.transparent, a.opacity, a.side, a.blending, a.depthWrite,
+        a.roughness, a.metalness, a.flatShading, a.vertexColors, map, m.castShadow, m.receiveShadow, m.renderOrder].join('|');
+      let g = groups.get(key); if (!g) groups.set(key, (g = [])); g.push(m);
+    }
+    let removed = 0;
+    const mtx = new THREE.Matrix4();
+    let gi = 0;
+    groups.forEach((list, mkey) => {
+      if (list.length < 2) return;
+      let ck = null, cached = null;
+      if (cache && cache.map) {
+        let vc = 0; for (const m of list) vc += m.geometry.attributes.position.count;
+        ck = cache.key + '#' + (gi++) + '|' + list.length + '|' + vc + '|' + mkey;
+        cached = cache.map.get(ck) || null;
+      }
+      if (cached) {
+        const first = list[0], merged = new THREE.Mesh(cached, first.material);
+        merged.castShadow = first.castShadow; merged.receiveShadow = first.receiveShadow; merged.renderOrder = first.renderOrder; merged.name = 'merged';
+        for (const m of list) { if (m.parent) m.parent.remove(m); removed++; }
+        root.add(merged); removed--;
+        return;
+      }
+      let nv = 0, ni = 0;
+      const geos = list.map((m) => {
+        let g = m.geometry.clone();
+        mtx.multiplyMatrices(inv, m.matrixWorld);
+        g.applyMatrix4(mtx);
+        if (mtx.determinant() < 0 && g.index) { const ix = g.index.array; for (let i = 0; i < ix.length; i += 3) { const t = ix[i + 1]; ix[i + 1] = ix[i + 2]; ix[i + 2] = t; } }
+        if (!g.index) { const n = g.attributes.position.count, ix = new Uint32Array(n); for (let i = 0; i < n; i++) ix[i] = i; g.setIndex(new THREE.BufferAttribute(ix, 1)); }
+        nv += g.attributes.position.count; ni += g.index.count;
+        return g;
+      });
+      const pos = new Float32Array(nv * 3), nor = new Float32Array(nv * 3), uv = new Float32Array(nv * 2), idx = new Uint32Array(ni);
+      const vcol = list[0].material.vertexColors ? new Float32Array(nv * 3).fill(1) : null; // giữ màu đỉnh (cá dùng vertex color)
+      let vo = 0, io = 0;
+      for (const g of geos) {
+        const n = g.attributes.position.count;
+        pos.set(g.attributes.position.array.subarray(0, n * 3), vo * 3);
+        if (g.attributes.normal) nor.set(g.attributes.normal.array.subarray(0, n * 3), vo * 3);
+        if (g.attributes.uv) uv.set(g.attributes.uv.array.subarray(0, n * 2), vo * 2);
+        if (vcol && g.attributes.color && g.attributes.color.itemSize === 3) vcol.set(g.attributes.color.array.subarray(0, n * 3), vo * 3);
+        const ix = g.index.array;
+        for (let i = 0; i < g.index.count; i++) idx[io + i] = ix[i] + vo;
+        vo += n; io += g.index.count;
+        g.dispose();
+      }
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+      geo.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
+      geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+      if (vcol) geo.setAttribute('color', new THREE.BufferAttribute(vcol, 3));
+      geo.setIndex(new THREE.BufferAttribute(nv > 65535 ? idx : new Uint16Array(idx), 1));
+      geo.computeBoundingSphere();
+      if (ck) cache.map.set(ck, geo);
+      const first = list[0], merged = new THREE.Mesh(geo, first.material);
+      merged.castShadow = first.castShadow; merged.receiveShadow = first.receiveShadow; merged.renderOrder = first.renderOrder;
+      merged.name = 'merged';
+      for (const m of list) { if (m.parent) m.parent.remove(m); removed++; }
+      root.add(merged);
+      removed--;
+    });
+    return removed;
+  };
   // Font nhúng sẵn trong fonts/fonts.css (hỗ trợ đầy đủ dấu tiếng Việt)
   G.FONT_UI = '"Be Vietnam Pro", system-ui, sans-serif';       // nội dung, số liệu: 400/600/800
   G.FONT_DISPLAY = '"Baloo 2", "Be Vietnam Pro", sans-serif';  // tiêu đề, biển hiệu, chữ bay: 600/800
@@ -63,6 +148,9 @@
     wanted: 0, onBoat: null, ownedBoats: [],
     ownedRods: ['rod_bamboo'], ownedLines: ['line_basic'],
     stats: { caught: 0, biggest: 0, junk: 0, explosions: 0, pantsAttempts: 0 },
+    wearing: {}, // { head, body, legs, feet, undies, chest } → id đồ câu được đang mặc
+    firstPerson: true, // mặc định góc nhìn thứ nhất; lăn chuột ra để về góc thứ ba
+    skillXp: 0, // kinh nghiệm Ngư Công (cấp skill Q/E/R)
     discovered: {},
   });
   G.state = G.defaultState();
@@ -85,7 +173,7 @@
     if (isTyping(e)) return;
     if (!input.keys[e.code]) input._pressed[e.code] = true;
     input.keys[e.code] = true;
-    if (['Space', 'Tab', 'F1', 'ArrowUp', 'ArrowDown'].includes(e.code)) e.preventDefault();
+    if (['Space', 'Tab', 'F1', 'F3', 'ArrowUp', 'ArrowDown'].includes(e.code)) e.preventDefault();
   });
   window.addEventListener('keyup', (e) => { input.keys[e.code] = false; });
   window.addEventListener('blur', () => { input.keys = {}; input.mouse.left = input.mouse.right = false; });
@@ -158,12 +246,19 @@
 
   G.paused = false;
   G.time = 0;
+  G.timeScale = 1;
+  let slowT = 0;
+  G.slowMo = function (scale, realSeconds) { G.timeScale = scale; slowT = realSeconds; };
   G.startLoop = function () {
     function frame() {
       requestAnimationFrame(frame);
+      const workStart = performance.now();
       // Khung chậm được chia thành nhiều bước ≤0.05s thay vì bị cắt → game không "slow motion".
       // Tối đa 0.25s/khung để khi chuyển tab về không tua nhanh cả chục giây.
-      let frameDt = Math.min(G.clock.getDelta(), 0.25);
+      const realDt = Math.min(G.clock.getDelta(), 0.25);
+      // slow motion kiểu phim (cá khổng lồ nhảy, lật thuyền): G.slowMo(0.35, 1.2)
+      if (slowT > 0) { slowT -= realDt; if (slowT <= 0) G.timeScale = 1; }
+      let frameDt = realDt * G.timeScale;
       if (G.paused) frameDt = 0;
       const steps = Math.max(1, Math.ceil(frameDt / 0.05));
       const dt = frameDt / steps;
@@ -178,6 +273,7 @@
         try { G.gfx.render(frameDt); } catch (e) { if (!G._gfxErr) { console.error('[gfx]', e); G._gfxErr = true; } G.renderer.render(G.scene, G.camera); }
       } else G.renderer.render(G.scene, G.camera);
       endFrameInput();
+      G.frameWorkMs = performance.now() - workStart; // thời gian game thật sự làm việc trong khung này
     }
     frame();
   };
@@ -193,8 +289,9 @@
     const token = ++prewarmToken; // đổi map giữa chừng → lô cũ tự dừng
     if (!r || !r.setRenderTarget || !scene || !cam) return Promise.resolve();
     const groups = new Map(), lights = [];
-    scene.traverseVisible((o) => {
-      if (o.isLight) lights.push(o);
+    // gồm cả vật đang ẩn (dây câu, phao, mẫu cần câu, hào quang...): shader không phụ thuộc hiển thị
+    scene.traverse((o) => {
+      if (o.isLight) { if (o.visible) lights.push(o); }
       else if (o.material && (o.isMesh || o.isPoints || o.isLine || o.isSprite)) {
         const k = [].concat(o.material)[0].uuid;
         let g = groups.get(k); if (!g) groups.set(k, (g = [])); g.push(o);
@@ -205,7 +302,11 @@
     let i = 0;
     return new Promise((resolve) => {
       function step() {
-        if (token !== prewarmToken || i >= list.length) { rt.dispose(); resolve(); return; }
+        if (token !== prewarmToken) { rt.dispose(); resolve(); return; }
+        if (i >= list.length) {
+          try { r.shadowMap.needsUpdate = true; r.setRenderTarget(rt); r.render(scene, cam); } catch (e) { /* */ }
+          r.setRenderTarget(null); rt.dispose(); resolve(); return;
+        }
         const t0 = performance.now(), mask = cam.layers.mask, shadowAuto = r.shadowMap.autoUpdate;
         r.shadowMap.autoUpdate = false; // không vẽ lại bóng đổ cho từng lô
         lights.forEach((l) => l.layers.enable(PREWARM_LAYER)); // đèn phải có mặt, nếu không shader biên dịch sai số đèn
@@ -213,10 +314,15 @@
         try {
           while (i < list.length && performance.now() - t0 < 12) {
             const objs = list[i++];
-            for (const o of objs) { o.layers.enable(PREWARM_LAYER); o._fc = o.frustumCulled; o.frustumCulled = false; }
+            const shown = [];
+            for (const o of objs) {
+              o.layers.enable(PREWARM_LAYER); o._fc = o.frustumCulled; o.frustumCulled = false;
+              for (let a = o; a && a !== scene; a = a.parent) if (!a.visible) { a.visible = true; shown.push(a); } // tạm hiện vật ẩn
+            }
             r.setRenderTarget(rt);
             r.render(scene, cam); // biên dịch shader + đẩy texture + đẩy hình khối của lô này
             for (const o of objs) { o.layers.disable(PREWARM_LAYER); o.frustumCulled = o._fc; }
+            for (const a of shown) a.visible = false;
           }
         } catch (e) { console.warn('[prewarm]', e); i = list.length; }
         r.setRenderTarget(null);
@@ -262,7 +368,12 @@
       if (o.geometry) o.geometry.dispose();
       if (o.material) {
         const mats = Array.isArray(o.material) ? o.material : [o.material];
-        mats.forEach((m) => { for (const k in m) if (m[k] && m[k].isTexture) m[k].dispose(); m.dispose(); });
+        mats.forEach((m) => {
+          for (const k in m) if (m[k] && m[k].isTexture) m[k].dispose();
+          // ShaderMaterial giữ texture trong uniforms (nước, mây billboard...) — trước đây bị sót → rò 2 texture mỗi lần đổi map
+          if (m.uniforms) for (const k in m.uniforms) { const v = m.uniforms[k] && m.uniforms[k].value; if (v && v.isTexture) v.dispose(); }
+          m.dispose();
+        });
       }
     });
     if (obj.parent) obj.parent.remove(obj);

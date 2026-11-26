@@ -5,7 +5,7 @@
     const m = G[name];
     if (m && typeof m.init === 'function') {
       try { m.init(); } catch (e) { console.error('[init ' + name + ']', e); }
-    } else console.warn('Module thiếu:', name);
+    } else if (!m) console.warn('Module thiếu:', name); // module không cần init (vd physics) thì bỏ qua
   }
   window.addEventListener('load', async () => {
     const T = (G.bootTimes = { start: performance.now() }); // đo thời gian khởi động (xem trong DevTools)
@@ -16,7 +16,7 @@
       return;
     }
     G.initCore();
-    ['physics', 'gfx', 'audio', 'fx', 'world', 'fish', 'player', 'fishing', 'systems', 'ui'].forEach(safeInit);
+    ['physics', 'gfx', 'audio', 'fx', 'world', 'fish', 'player', 'fishing', 'skills', 'systems', 'ui'].forEach(safeInit);
     T.init = performance.now();
     try { G.world.loadEnvironment(G.state.env || 'forest'); } catch (e) { console.error('[loadEnvironment]', e); }
     T.world = performance.now();

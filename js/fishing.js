@@ -515,7 +515,7 @@
     F.technique = r.technique;
     if (F.active) { buildRod(id); rod.root.visible = true; }
     const techName = { float: 'câu phao', spin: 'cuộn mồi giả', vertical: 'câu dọc', horizontal: 'câu lục/đáy' }[r.technique] || r.technique;
-    toast('🎣 ' + r.name + ' — kỹ thuật: ' + techName, 'info');
+    toast('Cần: ' + r.name + ' — kỹ thuật: ' + techName, 'info');
     emit('equip:changed', { slot: 'rod', id });
     return true;
   };
@@ -526,7 +526,7 @@
     if (F.state === 'fight') { toast('Đang vật cá, thay dây sao được!', 'warn'); return false; }
     eq().line = id;
     if (lineObj) refreshLineLook();
-    toast('🧵 ' + l.name, 'info');
+    toast('Dây: ' + l.name, 'info');
     emit('equip:changed', { slot: 'line', id });
     return true;
   };
@@ -536,7 +536,7 @@
     if (invCount(id) <= 0) { toast('Hết ' + b.name + ' rồi!', 'bad'); return false; }
     eq().bait = id;
     if (lineObj) refreshLineLook();
-    toast((b.icon || '') + ' Mồi: ' + b.name, 'info');
+    toast('Mồi: ' + b.name, 'info');
     emit('equip:changed', { slot: 'bait', id });
     return true;
   };
@@ -561,18 +561,6 @@
     }
     if (!silent) toast('Hết sạch mồi! Câu không mồi chỉ vớt được rác thôi.', 'warn');
     return false;
-  }
-  function cycleRod() {
-    const arr = (Array.isArray(G.state.ownedRods) ? G.state.ownedRods : ['rod_bamboo']).filter((id) => item(id));
-    if (arr.length <= 1) { toast('Bạn chỉ có một cây cần.', 'info'); return; }
-    const i = arr.indexOf(eq().rod);
-    F.setRod(arr[(i + 1) % arr.length]);
-  }
-  function cycleBait() {
-    const baits = ((G.data && G.data.BAITS) || []).filter((b) => invCount(b.id) > 0);
-    if (!baits.length) { toast('Không còn mồi nào!', 'bad'); return; }
-    const i = baits.findIndex((b) => b.id === eq().bait);
-    F.setBait(baits[(i + 1) % baits.length].id);
   }
   function consumeBait() {
     const b = baitD();
@@ -1103,7 +1091,7 @@
       D: Math.max(2.5, tipW.distanceTo(hook)),
       fwd, right, angle: 0, targetAngle: 0, angleT: rand(1, 3),
       depth: Math.max(0.3, F.hookDepth), targetDepth: F.hookDepth,
-      running: 0, actionT: rand(2, 4), jump: null, jumpCD: rand(2.5, 5), pumpCD: 0, pumpAnim: 0, spike: 0, overT: 0, dragT: 0, burstCD: 2,
+      running: 0, actionT: rand(2, 4), jump: null, jumpCD: beh === 'jumper' ? rand(2, 4) : rand(3.5, 7), pumpCD: 0, pumpAnim: 0, spike: 0, overT: 0, dragT: 0, capT: 0, capWarn: false, burstCD: 2,
       tension: 0, fishDir: 0, strain: 0, pos: hook.clone(), prevPos: hook.clone(), vel: new THREE.Vector3(),
       model: null, flying: beh === 'flying', t: 0, rippleT: 0, splashT: 0, combatSent: false, correct: false, side: 0, lower: false, reeling: false,
       maxLine: air ? 400 : r.technique === 'vertical' ? 250 : 150, yaw: 0, airborne: hook.y > waterH(hook.x, hook.z) + 1,
@@ -1126,6 +1114,12 @@
     F.state = 'fight';
     setModeSelf('fight');
     if (G.player) G.player.cameraFocus = fs.pos;
+    // hào quang + chiêu của cá (cá to/khổng lồ/quái vật/đột biến/meme)
+    fs.skills = isFish && G.skills ? G.skills.fishSkillsFor(sp) : [];
+    fs.skillT = rand(6, 10); fs.cast = null; fs.stun = 0; fs.hidden = 0; fs.enraged = false;
+    fs.boss = isFish && G.skills ? G.skills.isBoss(sp, W) : false;
+    const auraC = isFish && G.skills ? G.skills.auraColor(sp) : null;
+    fs.aura = auraC != null && G.fx && G.fx.aura ? G.fx.aura(model, auraC, Infinity, Math.max(0.8, len * 0.6)) : null;
     if (isFish) {
       const cat = sp.category;
       if (cat === 'khong_lo' || cat === 'quai_vat' || cat === 'dot_bien' || W > 300) { toast('Cái gì thế này?! Cần cong như cánh cung!', 'epic'); fx('shake', 0.4, 0.6); }
@@ -1148,6 +1142,8 @@
 
   function disposeFight() {
     if (!fs) return;
+    if (fs.aura) fs.aura.stop();
+    if (fs.cast && fs.cast.tele) fs.cast.tele.stop();
     if (fs.model && fs.model.parent) fs.model.parent.remove(fs.model);
     fs = null;
     F.fight = null;
@@ -1182,6 +1178,80 @@
     sfx('fail');
     if (fs && fs.pos) fx('splash', fs.pos.clone(), 0.6);
     endFight('escaped');
+  }
+  function SKA(id) { return !!(G.skills && G.skills.isActive(id)); }
+  function fishSurface(f) { return f.pos.clone().setY(waterH(f.pos.x, f.pos.z)); }
+  function hexS(c) { return '#' + c.toString(16).padStart(6, '0'); }
+  // Chiêu của cá khi vật dưới nước. Mạnh hơn khi cá trùm nổi Cuồng Nộ.
+  function fishSkill(f, sk) {
+    const at = fishSurface(f), k = f.enraged ? 1.4 : 1;
+    if (f.aura) f.aura.flare(0.6);
+    playerPos(tmpB);
+    if (sk.id === 'cuongphong') {
+      fx('waterDragon', at, Math.min(1.2, 0.5 + f.len * 0.12)); fx('shake', 0.45, 0.5); sfx('bigsplash');
+      f.spike += 0.9 * k; if (boatStability() > 0) f.capT += 0.8 * k;
+    } else if (sk.id === 'batdiet') {
+      fx('pillar', at, Math.max(1, f.len * 0.4), 10, 1.6, sk.color); fx('sparkle', at.clone().setY(at.y + 1), sk.color); sfx('fanfare', { volume: 0.4 });
+      f.stam = Math.min(1, f.stam + 0.18 * k);
+    } else if (sk.id === 'locxoay') {
+      fx('whirlpool', at, Math.max(3, f.len), 3, sk.color); fx('splash', at, 1.5);
+      f.running = 3 * k; f.targetAngle = rand(-1.4, 1.4);
+    } else if (sk.id === 'phongxa') {
+      fx('toxicCloud', tmpB.clone().setY(tmpB.y + 0.5), 1); fx('toxicCloud', at, 1.2);
+      G.state.stamina = Math.max(0, G.state.stamina - 20 * k); floatText(tmpB.clone().setY(tmpB.y + 2.2), '-' + Math.round(20 * k) + ' thể lực', '#66ff44');
+    } else if (sk.id === 'thiendien') { // sét của cá giáng xuống chính người câu
+      fx('lightning', tmpB.clone()); sfx('thunder');
+      G.state.stamina = Math.max(0, G.state.stamina - 15 * k); f.spike += 0.5 * k;
+      floatText(tmpB.clone().setY(tmpB.y + 2.2), 'Bị sét đánh! -' + Math.round(15 * k), hexS(sk.color));
+    } else if (sk.id === 'anthan') { // lặn mất tăm: không thấy bóng, không biết cá chạy hướng nào
+      f.hidden = 4 * k; fx('bubbles', at); fx('ripple', at, 2);
+    } else if (sk.id === 'phunlua') { // lửa lướt trên mặt nước về phía người câu, đốt dây
+      const dir = tmpA.set(tmpB.x - at.x, 0, tmpB.z - at.z).normalize();
+      fx('fireCone', at.clone().setY(at.y + 0.6), dir.clone(), Math.min(14, at.distanceTo(tmpB)), sk.color); sfx('explosion', { volume: 0.4 });
+      f.spike += 0.6 * k;
+    }
+  }
+  // Q/E/R của người chơi khi vật cá (cấp Ngư Công lv làm mạnh thêm)
+  function onSkillCast(d) {
+    if (!fs || !d || d.ctx !== 'fight') return;
+    const f = fs, lv = d.lv || 1, at = fishSurface(f);
+    const interrupt = () => {
+      if (!f.cast) return;
+      if (f.cast.tele) f.cast.tele.stop();
+      f.cast = null; f.skillT = rand(9, 15);
+      floatText(tipW.clone().add(tmpA.set(0, 0.8, 0)), 'Phá chiêu! +Nộ', '#8fd8ff');
+      G.skills.addRage(20);
+    };
+    if (d.id === 'loidien') {
+      f.stun = d.def.dur(lv); f.stam = Math.max(0, f.stam - (0.11 + lv * 0.01));
+      fx('lightning', at.clone().setY(Math.max(f.pos.y, at.y)));
+      if (ropeTop && ropeTop.inited && ropeTop.points) fx('arc', ropeTop.points); // điện chạy dọc dây câu
+      interrupt();
+    } else if (d.id === 'banhai') { // tuyệt chiêu: rồng nước kéo cá về
+      fx('waterDragon', at, 1.4); fx('shake', 0.8, 1.0);
+      f.stam = Math.max(0, f.stam * (1 - (0.42 + lv * 0.03)));
+      f.D = Math.max(2.5, f.D * (1 - (0.3 + lv * 0.02)));
+      f.stun = Math.max(f.stun, 1.5); f.running = 0;
+      interrupt();
+    } else if (d.id === 'thanluc') {
+      floatText(tipW.clone().add(tmpA.set(0, 0.6, 0)), 'Cần cứng như thép!', '#ffb020');
+    }
+  }
+  // Cá trùm đuối dưới 50% sức → Cuồng Nộ: hào quang đỏ, chiêu dày & mạnh hơn
+  function enrage(f) {
+    f.enraged = true;
+    if (f.aura) f.aura.stop();
+    if (G.fx && G.fx.aura) f.aura = G.fx.aura(f.model, 0xff2a1a, Infinity, Math.max(1.2, f.len * 0.8));
+    f.skillT = Math.min(f.skillT, 1.5);
+    if (G.slowMo) G.slowMo(0.4, 0.8);
+    fx('shockwave', fishSurface(f), Math.max(6, f.len * 2), 0xff3a2a); fx('shake', 0.5, 0.6); sfx('roar');
+    if (G.ui && G.ui.bigMessage) G.ui.bigMessage(f.ci.name + ' nổi Cuồng Nộ!', 'Chiêu dày và mạnh hơn — giữ Nộ để phá chiêu (E)', '#ff3a2a');
+  }
+  function capsizeBoat() {
+    const ci = fs.ci;
+    if (G.slowMo) G.slowMo(0.4, 1.0);
+    endFight('capsized');
+    emit('boat:capsize', { catchInfo: ci }); // player.js lật mô hình thuyền + hất người xuống nước
   }
   function draggedIn() {
     const ci = fs.ci;
@@ -1247,6 +1317,7 @@
     // ---- AI cá ----
     let act = 1, speedMul = 1;
     if (f.isFish) {
+      if (f.stun > 0) { f.stun -= dt; f.running = 0; }
       f.angleT -= dt;
       if (f.angleT <= 0) { f.targetAngle = rand(-1, 1) * (f.beh === 'runner' ? 1.25 : f.flying ? 1.5 : 0.95); f.angleT = rand(1.5, 4); }
       f.actionT -= dt;
@@ -1270,12 +1341,13 @@
       if (f.beh === 'fighter') act *= 1.15;
       // nhảy
       if (!f.jump && !f.flying) {
-        if (f.beh === 'jumper') f.jumpCD -= dt;
-        else if (f.beh === 'normal' && f.W < 20 && Math.random() < dt * 0.03) f.jumpCD = 0;
-        if (f.jumpCD <= 0 && f.D > 4 && f.stam > 0.08) {
-          f.jump = { t: 0, dur: 0.95 + Math.min(1.2, f.len * 0.25), h: 1.0 + Math.min(4, f.len * 1.2), lowered: false, checked: false };
-          fx('splash', f.pos.clone().setY(waterH(f.pos.x, f.pos.z)), 0.5 + Math.min(2, f.len));
+        // mọi con cá đều phóng khỏi mặt nước; jumper dày nhất, cá lặn sâu thưa nhất
+        f.jumpCD -= dt * (f.beh === 'jumper' ? 1 : f.beh === 'diver' ? 0.4 : 0.65);
+        if (f.jumpCD <= 0 && f.D > 4 && f.stam > 0.08 && f.stun <= 0) {
+          f.jump = { t: 0, dur: 0.9 + Math.min(1.6, f.len * 0.22), h: 1.2 + Math.min(7, f.len * 1.4), lowered: false, checked: false };
+          fx('splash', f.pos.clone().setY(waterH(f.pos.x, f.pos.z)), 0.5 + Math.min(3, f.len));
           sfx('bigsplash');
+          if (f.W >= 200 && G.slowMo) { G.slowMo(0.35, 1.1); fx('shake', 0.35, 0.5); toast(f.ci.name + ' phóng vọt khỏi mặt nước!', 'epic'); }
         }
       }
     }
@@ -1287,10 +1359,11 @@
         j.checked = true;
         if (!j.lowered) {
           f.spike += 0.6;
-          if (Math.random() < 0.3 * (1 - (r.sensitivity || 0.5) * 0.4)) { escapeFish('Cá nhảy văng lưỡi câu! (phải nhấn S hạ cần)'); return; }
+          if (Math.random() < (f.beh === 'jumper' ? 0.3 : 0.15) * (1 - (r.sensitivity || 0.5) * 0.4)) { escapeFish('Cá nhảy văng lưỡi câu! (phải nhấn S hạ cần)'); return; }
           toast('Không hạ cần! Dây giật căng!', 'bad');
         } else {
-          floatText(f.pos.clone().add(tmpA.set(0, 1, 0)), 'Hạ cần chuẩn!', '#7CFC00');
+          floatText(f.pos.clone().add(tmpA.set(0, 1, 0)), 'Hạ cần chuẩn! +Nộ', '#7CFC00');
+          if (G.skills) G.skills.addRage(12);
           f.stam = Math.max(0, f.stam - 0.06);
         }
       }
@@ -1299,9 +1372,31 @@
         sfx('splash');
         f.jump = null;
         f.depth = 0.5;
-        f.jumpCD = rand(3.5, 8) * (1.3 - 0.5 * f.stam);
+        f.jumpCD = (f.beh === 'jumper' ? rand(3.5, 8) : rand(5, 10)) * (1.3 - 0.5 * f.stam);
       }
     }
+
+    // ---- chiêu của cá: vận chiêu ~1.2s (hào quang bùng lên) rồi tung — Lôi Điện (X) phá được ----
+    if (f.isFish && f.boss && !f.enraged && f.stam < 0.5) enrage(f);
+    if (f.hidden > 0) f.hidden -= dt;
+    if (f.isFish && f.skills.length && f.stun <= 0) {
+      if (f.cast) {
+        f.cast.t -= dt;
+        if (f.cast.tele && (f.cast.sk.id !== 'thiendien' && f.cast.sk.id !== 'phongxa')) f.cast.tele.move(fishSurface(f));
+        if (f.cast.t <= 0) { if (f.cast.tele) f.cast.tele.stop(); fishSkill(f, f.cast.sk); f.cast = null; f.skillT = rand(9, 15) * (f.enraged ? 0.6 : 1); }
+      } else if ((f.skillT -= dt) <= 0 && f.stam > 0.15) {
+        const sk = f.skills[Math.floor(Math.random() * f.skills.length)];
+        const dur = sk.cast * (f.enraged ? 0.8 : 1);
+        // vòng cảnh báo: chiêu đánh vào người (sét, phóng xạ) cảnh báo dưới chân người câu, còn lại quanh cá
+        playerPos(tmpB);
+        const onPlayer = sk.id === 'thiendien' || sk.id === 'phongxa';
+        const tele = G.fx && G.fx.telegraph ? G.fx.telegraph(onPlayer ? tmpB.clone() : fishSurface(f), onPlayer ? 2.2 : Math.max(2.5, f.len * 1.2), dur, sk.color) : null;
+        f.cast = { sk, t: dur, dur, tele };
+        if (f.aura) f.aura.flare(dur);
+        floatText(fishSurface(f).setY(f.pos.y + 2), sk.name + '!', hexS(sk.color));
+      }
+    }
+    if (f.stun > 0) { act *= 0.15; speedMul = 0; }
 
     const stamF = f.isFish ? 0.35 + 0.65 * f.stam : 1;
     let pull = f.force * stamF * act;
@@ -1318,8 +1413,10 @@
       } else loadMul = 1.05;
     }
     f.correct = correct;
+    if (correct && G.skills) G.skills.addRage(dt * 6);
     if (correct && G.time - lastCorrectFx > 2.5) { lastCorrectFx = G.time; floatText(tipW.clone().add(tmpA.set(0, 0.3, 0)), 'Ghì cần đúng hướng!', '#7CFC00'); }
     if (lower && !f.jump) loadMul *= 0.85;
+    if (SKA('thanluc')) loadMul *= 1 - (0.35 + 0.01 * (G.skills ? G.skills.level() : 1));
 
     // ---- khoảng cách & lực ----
     const strain = pull / holdForce;
@@ -1328,7 +1425,7 @@
     if (reeling) {
       // cá còn khỏe thì cưỡng lại, cuộn chậm; cá đuối thì cuộn nhanh
       const resist = f.isFish ? 0.45 + 0.55 * (1 - f.stam * 0.85) : 1;
-      const gain = (r.reelSpeed || 2) * resist * clamp(1.2 - strain * 0.55, 0.06, 1) * (lower ? 0.6 : 1) * (correct ? 1.15 : 1) * (exhausted ? 0.25 : 1);
+      const gain = (r.reelSpeed || 2) * resist * clamp(1.2 - strain * 0.55, 0.06, 1) * (lower ? 0.6 : 1) * (correct ? 1.15 : 1) * (exhausted ? 0.25 : 1) * (SKA('thanluc') ? 1.5 + 0.03 * (G.skills ? G.skills.level() : 1) : 1);
       const slip = (strain > 1 ? vFish * Math.min(1, strain - 1) : f.running > 0 ? vFish * 0.25 : 0) + (f.isFish ? vFish * 0.22 * f.stam : 0);
       dD = (slip - gain) * dt;
       load = pull + (r.power || 8) * 0.03;
@@ -1390,9 +1487,11 @@
     // cuộn tốn sức; ghì cần không cuộn tốn ít hơn; lực kéo nhẹ mà không cuộn thì hồi sức (nghỉ tay)
     let pdrain = reeling ? 0.8 + 4 * st : st > 1 ? 1.2 * (st - 1) + 0.6 : -4 * (1 - st);
     if (pdrain > 0) pdrain *= 1 - 0.5 * boatHold;
+    if (pdrain > 0 && G.state.wearing && G.state.wearing.chest === 'junk_bra') pdrain *= 0.9; // áo lót: đỡ mất sức
+    if (SKA('thanluc')) pdrain = Math.min(pdrain, -2); // Thần Lực Ghì Cần: không mất sức, hồi chậm → đứng bờ vẫn có cửa với cá hàng chục tấn
     G.state.stamina = clamp((typeof G.state.stamina === 'number' ? G.state.stamina : 100) - pdrain * dt, 0, 100);
     // ---- bị kéo xuống nước ----
-    if (f.isFish && G.state.stamina <= 0 && pull > ((r.power || 8) + pStr) * 2 * (1 + boatHold * 2)) {
+    if (f.isFish && !SKA('thanluc') && G.state.stamina <= 0 && pull > ((r.power || 8) + pStr) * 2 * (1 + boatHold * 2)) {
       if (boatHold >= 1) {
         // tàu thép: không bị kéo xuống nước, cá kéo cả tàu đi
         // tàu thép quá nặng: không bị kéo xuống nước
@@ -1401,6 +1500,18 @@
         if (f.dragT > 1.5) { draggedIn(); return; }
       }
     } else f.dragT = Math.max(0, f.dragT - dt);
+
+    // ---- lật thuyền: cá quá khỏe so với độ vững thuyền (tàu thép không bao giờ lật) ----
+    if (f.isFish && boatHold > 0 && boatHold < 1 && !SKA('thanluc')) {
+      // sức chở theo độ vững: bè ~245kg, thúng ~375kg, thuyền gỗ ~900kg, cano ~1.9 tấn
+      const ratio = f.W / (150 + 3500 * boatHold * boatHold * boatHold);
+      if (ratio > 1 && (reeling || f.tension > 0.6)) f.capT += dt * Math.min(2, ratio - 1) * 0.35; // cá nặng hơn sức chở mà dây đang căng
+      else f.capT = Math.max(0, f.capT - dt * 0.4);                                 // nhả dây → thuyền thăng bằng lại
+      if (ratio > 1 && f.jump && f.jump.t <= dt && f.D < 25) f.capT += 0.5 * Math.min(2, ratio); // cá phóng lên sát thuyền
+      if (f.capT > 1.2 && !f.capWarn) { f.capWarn = true; toast('Thuyền chao đảo! Nhả chuột cho dây chùng (hoặc Q Thần Lực) kẻo lật!', 'warn'); fx('shake', 0.25, 0.4); }
+      if (f.capT < 0.6) f.capWarn = false;
+      if (f.capT > 2.5) { capsizeBoat(); return; }
+    }
 
     // ---- di chuyển cá ----
     const prevAngle = f.angle;
@@ -1431,7 +1542,11 @@
 
     // ---- hint ----
     let hint;
-    if (f.jump && !f.jump.lowered) hint = 'CÁ NHẢY! Nhấn [S] hạ cần!';
+    if (f.capT > 0.5 && boatHold > 0) hint = 'Thuyền chao đảo ' + Math.round(f.capT / 2.5 * 100) + '%! Nhả chuột hoặc [Q] Thần Lực — cá hàng tấn cần tàu thép!';
+    else if (f.cast) hint = 'Cá vận chiêu ' + f.cast.sk.name + ' — nhấn [E] Lôi Điện để phá!';
+    else if (f.hidden > 0) hint = 'Cá ẩn thân — không biết nó chạy hướng nào, giữ dây vừa phải!';
+    else if (f.stun > 0) hint = 'Cá bị sét đánh choáng — cuộn mạnh lên!';
+    else if (f.jump && !f.jump.lowered) hint = 'CÁ NHẢY! Nhấn [S] hạ cần!';
     else if (f.tension > 0.85) hint = 'Căng dây quá! Nhả chuột trái!';
     else if (G.state.stamina <= 0) hint = 'Hết sức! Nhả chuột nghỉ tay, hoặc ăn bánh mì / uống rượu (phím 1-5)!';
     else if (f.isFish && fdAbs > 0.35 && !correct) hint = f.fishDir > 0 ? 'Cá chạy sang phải — giữ [A] ghì cần!' : 'Cá chạy sang trái — giữ [D] ghì cần!';
@@ -1444,7 +1559,8 @@
     const ff = F.fight;
     if (ff) {
       ff.tension = f.tension; ff.fishStamina = f.stam; ff.distance = f.D; ff.fishDir = f.fishDir; ff.hint = hint;
-      ff.strain = strain; ff.jumping = !!f.jump; ff.maxDistance = f.maxLine; ff.correct = correct;
+      ff.strain = strain; ff.jumping = !!f.jump; ff.capsize = f.capT / 2.5; ff.hidden = f.hidden > 0; ff.enraged = f.enraged;
+      ff.cast = f.cast ? { name: f.cast.sk.name, color: f.cast.sk.color, progress: 1 - f.cast.t / f.cast.dur } : null; ff.maxDistance = f.maxLine; ff.correct = correct;
     }
     setAnim(reeling ? 'reel' : 'pull');
     if (reeling) startReelSound(0.6 + (r.reelSpeed || 2) * 0.15 * clamp(1.2 - strain * 0.55, 0.1, 1));
@@ -1460,7 +1576,7 @@
       if (Math.random() < 0.3) fx('bubbles', tmpB.clone());
     }
     // bóng cá
-    if (under && f.isFish && f.depth < 6) {
+    if (under && f.isFish && f.depth < 6 && f.hidden <= 0) {
       shadowMesh.visible = true;
       shadowMesh.position.set(f.pos.x, wy + 0.03, f.pos.z);
       shadowMesh.rotation.set(-PI / 2, f.yaw, 0);
@@ -1469,7 +1585,7 @@
     // mô hình
     const mdl = f.model;
     if (mdl) {
-      mdl.visible = f.D < 8 || !!f.jump || f.flying || f.pos.y > wy - 0.3;
+      mdl.visible = (f.D < 8 || !!f.jump || f.flying || f.pos.y > wy - 0.3) && !(f.hidden > 0 && !f.jump);
       mdl.position.copy(f.pos);
       const hs = Math.hypot(f.vel.x, f.vel.z);
       if (hs > 0.05) f.yaw = dampAngle(f.yaw, Math.atan2(f.vel.x, f.vel.z), 6, dt);
@@ -1523,7 +1639,7 @@
     const sp0 = landing.basePos.clone();
     fx('sparkle', sp0, epic ? 0xffaa00 : 0xffffaa);
     if (ci.kind === 'fish') floatText(sp0.clone().add(tmpA.set(0, 0.8, 0)), wtxt, color);
-    else if (ci.kind === 'junk') floatText(sp0.clone().add(tmpA.set(0, 0.6, 0)), 'Rác... 😅', '#cccccc');
+    else if (ci.kind === 'junk') floatText(sp0.clone().add(tmpA.set(0, 0.6, 0)), 'Rác...', '#cccccc');
     emit('fish:caught', { catchInfo: ci });
     emit('fight:end', { result: 'caught', catchInfo: ci });
     // pháo hoa + chuỗi nổ "bùm bùm" cho cá khổng lồ do fx.js lo (nghe fish:caught)
@@ -1545,11 +1661,28 @@
       if (mdl.userData && typeof mdl.userData.animate === 'function') { try { mdl.userData.animate(L.t, Math.max(0.2, 1 - L.t / L.dur)); } catch (e) { } }
       if (Math.random() < dt * 3) fx('sparkle', mdl.position.clone().add(tmpA.set(rand(-0.3, 0.3), rand(0, 0.4), rand(-0.3, 0.3))), 0xffffcc);
     }
-    if (L.t >= L.dur || (inp && L.t > 1 && mouse().leftPressed)) {
-      if (mdl && mdl.parent) mdl.parent.remove(mdl);
-      landing = null;
-      F.state = 'idle';
-      setAnim('idle', true);
+    if (!L.stow && (L.t >= L.dur || (inp && L.t > 1 && mouse().leftPressed))) {
+      L.stow = { t: 0, from: mdl ? mdl.position.clone() : null, s0: mdl ? mdl.scale.x : 1 };
+    }
+    // cất vào giỏ tre bên hông: cá/đồ thu nhỏ rồi bay vào giỏ → người chơi thấy rõ nó đi đâu
+    if (L.stow) {
+      const S0 = L.stow; S0.t += dt;
+      const u = Math.min(1, S0.t / 0.55);
+      if (mdl && S0.from) {
+        const bk = G.player && G.player.basket;
+        if (bk) bk.getWorldPosition(tmpC); else playerPos(tmpC);
+        mdl.position.lerpVectors(S0.from, tmpC, u * u);
+        mdl.position.y += Math.sin(u * PI) * 0.8;
+        mdl.scale.setScalar(S0.s0 * Math.max(0.02, 1 - u));
+      }
+      if (u >= 1) {
+        if (mdl && mdl.parent) mdl.parent.remove(mdl);
+        if (mdl) mdl.scale.setScalar(S0.s0);
+        sfx('pop');
+        landing = null;
+        F.state = 'idle';
+        setAnim('idle', true);
+      }
     }
   }
 
@@ -1602,7 +1735,7 @@
     });
     setAnim('cast', true);
     sfx('whoosh');
-    toast('🧨 Ném thuốc nổ! Tránh xa ra!', 'warn');
+    toast('Ném thuốc nổ! Tránh xa ra!', 'warn');
     return true;
   };
   const dynV = { x: 0, y: 0, z: 0 };
@@ -1896,12 +2029,6 @@
     F.technique = rodD().technique;
 
     if (inp) {
-      if (KP('KeyR')) { if (F.state === 'idle') cycleRod(); else if (F.state !== 'landing') toast('Thu dây trước đã rồi đổi cần!', 'warn'); }
-      if (KP('KeyB')) {
-        if (F.state === 'fight') { /* bỏ qua */ }
-        else if (G.ui && G.ui.openPanel) G.ui.openPanel('bait');
-        else cycleBait();
-      }
       if (KP('Escape') && (F.state === 'waiting' || F.state === 'casting')) cancelLine();
     }
 
@@ -1913,7 +2040,6 @@
             if (F.tangled > 0) toast('Đang gỡ rối dây...', 'warn');
             else startCharging();
           }
-          if (m.wheel) F.depth = clamp(F.depth + m.wheel * 0.25, 0.2, 60);
         }
         setAnim('idle');
         break;
@@ -1964,6 +2090,7 @@
   let inited = false;
   F.init = function () {
     if (inited) return;
+    G.bus.on('skill:cast', onSkillCast);
     V3 = THREE.Vector3;
     UP = new V3(0, 1, 0);
     tipW = new V3(); handW = new V3(); aimV = new V3(0, 0, 1); rightV = new V3();
@@ -1992,6 +2119,4 @@
     else if (mode === 'explore' || mode === 'boat') { if (activate()) { prevMode = mode; setModeSelf('fishing'); } }
   };
   F.cancel = function () { cancelLine(); };
-  F.cycleRod = cycleRod;
-  F.cycleBait = cycleBait;
 })();

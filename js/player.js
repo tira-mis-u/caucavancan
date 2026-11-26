@@ -97,9 +97,43 @@
   function mesh(geo, m, x, y, z, parent) {
     const o = new THREE.Mesh(geo, m);
     o.position.set(x || 0, y || 0, z || 0);
-    o.castShadow = true;
+    // chi tiết tí hon (mắt, ngón, nút áo...) không đổ bóng: bóng không thấy được mà tốn 1 draw call/khung
+    if (!geo.boundingSphere) geo.computeBoundingSphere();
+    o.castShadow = geo.boundingSphere.radius > 0.035;
     if (parent) parent.add(o);
     return o;
+  }
+  // Sịp tam giác ôm hông: 2 mảnh (trước/sau) bám theo elip hông (rx, rz), cao h; mỗi hàng hẹp dần từ
+  // full hông (lưng thun) xuống đáy → cạnh khoét chéo lộ đùi; đáy nối 2 mảnh. Gốc ở mép lưng thun (y = 0).
+  function briefsGeometry(rx, rz, h) {
+    const R = 7, C = 12, pos = [], uv = [], idx = [];
+    const rowStart = [[], []];
+    for (let p = 0; p < 2; p++) {
+      const sign = p ? -1 : 1;
+      for (let r = 0; r <= R; r++) {
+        const s = r / R, a = Math.PI / 2 - (Math.PI / 2 - 0.22) * Math.pow(s, 0.6);
+        const kx = 1 - 0.3 * s * s, kz = 1 - 0.55 * s * s;
+        rowStart[p][r] = pos.length / 3;
+        for (let c = 0; c <= C; c++) {
+          const ph = -a + (2 * a * c) / C;
+          pos.push(rx * kx * Math.sin(ph), -h * s, sign * rz * kz * Math.cos(ph));
+          uv.push(c / C * 2, (1 - s) * 2);
+        }
+      }
+      for (let r = 0; r < R; r++) for (let c = 0; c < C; c++) {
+        const a0 = rowStart[p][r] + c, b0 = rowStart[p][r + 1] + c;
+        if (sign > 0) idx.push(a0, b0, a0 + 1, b0, b0 + 1, a0 + 1);
+        else idx.push(a0, a0 + 1, b0, b0, a0 + 1, b0 + 1);
+      }
+    }
+    const f = rowStart[0][R], b = rowStart[1][R]; // đáy: nối mép dưới mảnh trước với mảnh sau
+    for (let c = 0; c < C; c++) idx.push(f + c, b + c, f + c + 1, b + c, b + c + 1, f + c + 1);
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+    g.setIndex(idx);
+    g.computeVertexNormals();
+    return g;
   }
   function grp(parent, x, y, z) { const g = new THREE.Group(); g.position.set(x || 0, y || 0, z || 0); if (parent) parent.add(g); return g; }
 
@@ -181,6 +215,49 @@
     const ll = leg(1), rl = leg(-1);
     J.lHip = ll.hip; J.lKnee = ll.knee; J.lAnk = ll.ank; J.rHip = rl.hip; J.rKnee = rl.knee; J.rAnk = rl.ank;
 
+    // giỏ tre đeo hông: cá/đồ câu được bay vào đây; có cá thì thò đuôi cá ra
+    const basket = grp(body, -0.24, -0.08, -0.04); P.basket = basket;
+    const weave = mat(0xa8803f, { roughness: 1 });
+    mesh(new THREE.CylinderGeometry(0.11, 0.08, 0.2, 10, 1, true), weave, 0, 0, 0, basket).material.side = THREE.DoubleSide;
+    mesh(new THREE.TorusGeometry(0.11, 0.012, 5, 14), mat(0x7a5a2a), 0, 0.1, 0, basket).rotation.x = Math.PI / 2;
+    mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.01, 10), weave, 0, -0.1, 0, basket);
+    const tails = grp(basket, 0, 0.1, 0); J.basketFill = tails;
+    const finM = mat(0x8a9aa8, { roughness: 0.5, metalness: 0.2 });
+    for (const [x, z, r] of [[0.03, 0.02, 0.3], [-0.04, -0.02, -0.4], [0.0, -0.05, 0.1]]) { const c = mesh(new THREE.ConeGeometry(0.035, 0.12, 4), finM, x, 0.05, z, tails); c.rotation.z = r; }
+    tails.visible = false;
+
+    // quần áo mặc được (đồ câu được) — bật/tắt theo G.state.wearing
+    J.mShirt = shirt; J.mPants = pants; J.mSandal = sandal; J.mHat = hatM;
+    J.base = { shirt: shirt.color.getHex(), pants: pants.color.getHex(), sandal: sandal.color.getHex(), hat: hatM.color.getHex() };
+    const undies = grp(body, 0, 0, 0); J.wUndies = undies; // sịp hoa mặc ngoài quần kiểu siêu nhân
+    const undM = new THREE.MeshStandardMaterial({ color: 0xff4f6d, roughness: 0.8, map: (function () {
+      const c = document.createElement('canvas'); c.width = c.height = 32; const g = c.getContext('2d');
+      g.fillStyle = '#ff4f6d'; g.fillRect(0, 0, 32, 32); g.fillStyle = '#ffe14d';
+      for (const [x, y] of [[6, 6], [22, 9], [12, 20], [26, 26], [4, 27]]) { g.beginPath(); g.arc(x, y, 3.5, 0, 6.283); g.fill(); }
+      const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; return t;
+    })() });
+    undM.side = THREE.DoubleSide;
+    mesh(briefsGeometry(0.222, 0.175, 0.25), undM, 0, 0.015, 0, undies); // sịp TAM GIÁC: cạnh khoét chéo từ hông xuống đáy, không có ống
+    const band = mesh(new THREE.CylinderGeometry(0.224, 0.224, 0.035, 22, 1, true), mat(0xffffff), 0, 0.0, 0, undies); // lưng thun
+    band.scale.z = 0.79; band.material.side = THREE.DoubleSide;
+    const bra = grp(chest, 0, 0.36, 0.12); J.wBra = bra;
+    const braM = mat(0xff8fc8);
+    for (const sx of [-1, 1]) { const cup = mesh(new THREE.SphereGeometry(0.07, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2), braM, 0.08 * sx, 0, 0, bra); cup.rotation.x = Math.PI / 2; }
+    mesh(new THREE.TorusGeometry(0.19, 0.01, 4, 20), braM, 0, 0, -0.12, bra).rotation.x = Math.PI / 2;
+    const shoeM = mat(0xf2f2f2), shoeR = mat(0xd03a2f), bootM = mat(0x2f5d33, { roughness: 0.6 });
+    J.wShoes = []; J.wBoots = [];
+    for (const ank of [ll.ank, rl.ank]) {
+      const sh = grp(ank, 0, 0, 0);
+      mesh(new THREE.BoxGeometry(0.11, 0.07, 0.27), shoeM, 0, -0.035, 0.03, sh);
+      mesh(new THREE.BoxGeometry(0.112, 0.025, 0.275), shoeR, 0, -0.07, 0.03, sh);
+      J.wShoes.push(sh);
+      const bt = grp(ank, 0, 0, 0);
+      mesh(new THREE.CylinderGeometry(0.065, 0.06, 0.34, 10), bootM, 0, 0.12, 0, bt);
+      mesh(new THREE.BoxGeometry(0.1, 0.07, 0.24), bootM, 0, -0.035, 0.03, bt);
+      J.wBoots.push(bt);
+    }
+    undies.visible = bra.visible = false; J.wShoes.forEach((o) => { o.visible = false; }); J.wBoots.forEach((o) => { o.visible = false; });
+
     // đạo cụ trên tay phải
     props.bottle = grp(P.hand, 0, -0.03, 0.05);
     mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.17, 10), mat(0x2f7a3a, { roughness: 0.3, transparent: true, opacity: 0.85 }), 0, 0, 0, props.bottle);
@@ -199,7 +276,7 @@
     mesh(new THREE.BoxGeometry(0.13, 0.008, 0.008), mat(0xcc3333), 0, 0.08, 0.13, props.sling);
     props.bottle.visible = props.banhmi.visible = props.sling.visible = false;
 
-    root.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = false; } });
+    root.traverse((o) => { if (o.isMesh) o.receiveShadow = false; }); // castShadow đã đặt theo cỡ trong mesh()
     return root;
   }
 
@@ -477,6 +554,9 @@
     else if (mode === 'shoot') maxSp = 2.2;
     else if (mode === 'combat') maxSp = 4.2;
     else maxSp = run ? (st.wanted > 0.3 && mode === 'explore' ? 7.8 : 7.0) : 4.0;
+    const feet = st.wearing && st.wearing.feet;
+    if (feet === 'junk_shoe' && !S.swimming) maxSp *= 1.12; // giày thể thao: chạy nhanh hơn
+    if (feet === 'junk_boot' && S.swimming) maxSp *= 1.2;   // ủng cao su: bơi khỏe hơn
     const gHere = groundH(pos.x, pos.z);
     const wading = !S.swimming && isWater(pos.x, pos.z) && waterH(pos.x, pos.z) - gHere > 0.35 && pos.y < waterH(pos.x, pos.z);
     if (wading) maxSp *= 0.65;
@@ -741,6 +821,28 @@
     P.facing = S.targetFacing = Math.atan2(dir.x, dir.z);
     sfx('whoosh'); sfx('roar', { volume: 0.5 });
     fx('shake', 0.4, 0.5);
+  }
+
+  // ---- Lật thuyền: thuyền lật úp, nổi vài giây rồi chìm; người bị hất xuống nước ----
+  const wrecks = [];
+  function onCapsize(d) {
+    const b = P.boat;
+    if (!b) return;
+    if (b.engine) { try { b.engine.stop(); } catch (e) { /* */ } }
+    P.boat = null; G.state.onBoat = null;
+    P.obj.rotation.set(0, P.facing, 0);
+    wrecks.push({ obj: b.obj, t: 0, roll0: b.obj.rotation.z, dir: Math.random() < 0.5 ? -1 : 1 });
+    fx('splash', b.obj.position.clone(), 2.5); sfx('bigsplash'); fx('shake', 0.6, 0.7);
+    onDragged(d);
+  }
+  function updateWrecks(dt) {
+    for (let i = wrecks.length - 1; i >= 0; i--) {
+      const w = wrecks[i], o = w.obj;
+      w.t += dt;
+      o.rotation.z = w.roll0 + w.dir * Math.PI * ss(0, 0.9, w.t); // lật úp
+      o.position.y = waterH(o.position.x, o.position.z) - 0.15 - (w.t > 8 ? (w.t - 8) * 0.8 : 0);
+      if (w.t > 11) { G.disposeObject(o); wrecks.splice(i, 1); }
+    }
   }
 
   function updateFlight(dt, t) {
@@ -1258,7 +1360,7 @@
     const sp = ci.species || (G.fish && G.fish.get && G.fish.get(ci.id)) || {};
     let len = 1;
     try { if (G.fish && G.fish.lengthFromWeight) len = G.fish.lengthFromWeight(sp, ci.weight); } catch (e) { /* */ }
-    len = clamp(len || 1, 0.6, 4.5);
+    len = clamp(len || 1, 0.6, 7); // cá khổng lồ/quái vật lên bờ phải to thật (trước giới hạn 4,5m)
     let model = null;
     if (d.fishObj && d.fishObj.isObject3D) { model = d.fishObj; if (model.parent) model.parent.remove(model); model.visible = true; model.scale.setScalar(1); }
     else { try { if (G.fish && G.fish.createModel) model = G.fish.createModel(ci.id, len); } catch (e) { model = null; } }
@@ -1278,7 +1380,7 @@
     const box = new THREE.Box3().setFromObject(model);
     const size = box.getSize(V3());
     const bottom = -box.min.y;
-    const radius = clamp(Math.max(size.x, size.z) * 0.5, 0.3, 3);
+    const radius = clamp(Math.max(size.x, size.z) * 0.5, 0.3, 4.5);
     G.scene.add(model);
 
     const key = (String(ci.id) + ' ' + (ci.name || '') + ' ' + (sp.name || '')).toLowerCase();
@@ -1296,6 +1398,12 @@
       onBoat: !!P.boat, boatLocal: null,
     };
     C0.hp = C0.maxHp;
+    // chiêu + hào quang của cá (theo nhóm cá)
+    C0.skills = G.skills ? G.skills.fishSkillsFor(sp) : [];
+    C0.skillT = U.rand(4, 7); C0.cast = null; C0.hidden = 0; C0.enraged = false;
+    C0.boss = G.skills ? G.skills.isBoss(sp, ci.weight || 0) : false;
+    const auraC = G.skills ? G.skills.auraColor(sp) : null;
+    C0.aura = auraC != null && G.fx && G.fx.aura ? G.fx.aura(model, auraC, Infinity, Math.max(0.9, radius * 1.4)) : null;
     if (P.boat) {
       const b = P.boat;
       C0.boatLocal = V3(0, b.seat.y - 0.05, b.seat.z + clamp(radius + 1.0, 1.2, b.len * 0.45));
@@ -1338,7 +1446,7 @@
   function playerAttack() {
     S.combo = S.comboT > 0 ? (S.combo + 1) % 3 : 0;
     S.comboT = 0.9;
-    S.atkCd = S.combo === 2 ? 0.55 : 0.32;
+    S.atkCd = (S.combo === 2 ? 0.55 : 0.32) * (skillOn('lienhoan') ? 0.5 : 1);
     P.setAnim('attack', S.combo === 2 ? 0.5 : 0.36, P.boat && S.combo === 2 ? 1 : S.combo);
     S.pendingHit = { t: S.combo === 2 ? 0.18 : 0.12, combo: S.combo };
     sfx('whoosh', { volume: 0.5 });
@@ -1358,11 +1466,14 @@
     let dmg = h.combo === 2 ? U.rand(17, 24) : U.rand(9, 14);
     dmg *= 1 + (G.state.drunk || 0) * 0.4;
     if (G.state.buffs && G.state.buffs.strength) dmg *= 1.5;
+    if (skillOn('lienhoan')) dmg *= 2 + 0.05 * skillLv();
+    if (C.hidden > 0) dmg *= 0.5; // cá đang ẩn thân: khó đánh trúng chỗ hiểm
     const crit = Math.random() < 0.12;
     if (crit) dmg *= 1.8;
     dmg = Math.round(dmg);
     C.hp = Math.max(0, C.hp - dmg);
     C.flash = 0.15;
+    if (G.skills) G.skills.addRage(crit ? 12 : 6); // đánh trúng → tích Nộ
     fx('floatText', V3(fp.x, fp.y + 1 + C.radius * 0.4, fp.z), (crit ? 'CHÍ MẠNG -' : '-') + dmg, crit ? '#ff8800' : '#ffdd55');
     sfx('punch');
     fx('shake', h.combo === 2 ? 0.25 : 0.12, 0.15);
@@ -1374,9 +1485,81 @@
     if (C.hp <= 0) winCombat();
   }
 
+  function skillOn(id) { return !!(G.skills && G.skills.isActive(id)); }
+  function skillLv() { return G.skills ? G.skills.level() : 1; }
+  function hexS(c) { return '#' + c.toString(16).padStart(6, '0'); }
+  function inZone(z) { const pp = P.obj.position; return z && Math.hypot(pp.x - z.x, pp.z - z.z) < z.r; }
+  function fishHitScaled(mult) { const d0 = C.dmg; C.dmg = Math.round(d0 * mult * (C.enraged ? 1.3 : 1)); fishAttackHit(); if (C) C.dmg = d0; }
+  // Chiêu của cá khi đánh trên bờ. Vùng đánh (C.cast.zone) được chốt lúc bắt đầu vận chiêu → chạy ra khỏi vòng là né.
+  function combatFishSkill(sk) {
+    const fp = fishWorldPos(V3()), z = C.cast && C.cast.zone;
+    if (sk.id === 'cuongphong') {
+      fx('waterDragon', fp.clone(), 0.6); fx('shake', 0.5, 0.5); sfx('bigsplash');
+      if (inZone(z)) fishHitScaled(1.6);
+    } else if (sk.id === 'batdiet') {
+      const h = Math.round(C.maxHp * 0.15 * (C.enraged ? 1.3 : 1)); C.hp = Math.min(C.maxHp, C.hp + h);
+      fx('pillar', fp.clone(), Math.max(1, C.radius), 8, 1.6, sk.color); fx('floatText', V3(fp.x, fp.y + 1.6, fp.z), '+' + h, hexS(sk.color));
+    } else if (sk.id === 'locxoay') {
+      fx('whirlpool', fp.clone(), 3, 1.2, sk.color); C.state = 'strike'; C.timer = 0.45; C.didHit = false;
+    } else if (sk.id === 'phongxa') {
+      fx('toxicCloud', V3(z.x, z.y + 0.4, z.z), 1);
+      if (inZone(z)) { G.state.stamina = Math.max(0, G.state.stamina - 25); fishHitScaled(0.5); fx('floatText', P.obj.position.clone().add(V3(0, 2.3, 0)), '-25 thể lực', '#66ff44'); }
+    } else if (sk.id === 'thiendien') {
+      fx('lightning', V3(z.x, z.y, z.z)); sfx('thunder');
+      if (inZone(z)) fishHitScaled(1.8);
+    } else if (sk.id === 'anthan') {
+      C.hidden = 3 * (C.enraged ? 1.3 : 1); fx('bubbles', fp.clone()); fx('ripple', fp.clone(), 2);
+    } else if (sk.id === 'phunlua') {
+      const dir = V3(Math.sin(C.facing), 0, Math.cos(C.facing));
+      fx('fireCone', fp.clone().add(V3(0, C.radius * 0.6, 0)), dir, 6, sk.color); sfx('explosion', { volume: 0.4 });
+      if (inZone(z)) fishHitScaled(1.5);
+    }
+  }
+  function combatEnrage() {
+    C.enraged = true;
+    if (C.aura) C.aura.stop();
+    if (G.fx && G.fx.aura) C.aura = G.fx.aura(C.model, 0xff2a1a, Infinity, Math.max(1.2, C.radius * 1.8));
+    C.skillT = Math.min(C.skillT, 1.2);
+    if (G.slowMo) G.slowMo(0.4, 0.8);
+    fx('shockwave', fishWorldPos(V3()), 7, 0xff3a2a); fx('shake', 0.5, 0.6); sfx('roar');
+    if (G.ui && G.ui.bigMessage) G.ui.bigMessage((C.catchInfo.name || 'Con cá') + ' nổi Cuồng Nộ!', 'Chiêu dày và mạnh hơn — né vòng đỏ, E để phá chiêu', '#ff3a2a');
+  }
+  // Q/E/R của người chơi khi đánh trên bờ
+  function onSkillCast(d) {
+    if (!d || d.ctx !== 'combat' || !C) return;
+    const lv = d.lv || 1, fp = fishWorldPos(V3());
+    const interrupt = () => {
+      if (!C.cast) return;
+      if (C.cast.tele) C.cast.tele.stop();
+      C.cast = null; C.skillT = U.rand(7, 11);
+      fx('floatText', V3(fp.x, fp.y + 2, fp.z), 'Phá chiêu! +Nộ', '#8fd8ff'); G.skills.addRage(20);
+    };
+    if (d.id === 'loidien') {
+      fx('lightning', fp); interrupt();
+      const dmg = 36 + lv * 6; C.hp = Math.max(0, C.hp - dmg);
+      fx('floatText', V3(fp.x, fp.y + 1.2 + C.radius * 0.4, fp.z), '-' + dmg, '#8fd8ff');
+      C.state = 'stunned'; C.timer = d.def.dur(lv); setGlow(0, 0, 0);
+    } else if (d.id === 'chandia') { // tuyệt chiêu: dậm đất, sóng xung kích
+      const pp = P.obj.position;
+      P.setAnim('attack', 0.6, 2);
+      fx('shockwave', pp.clone(), 8, 0xffd23f); fx('shockwave', pp.clone(), 5, 0xffffff); fx('pillar', pp.clone(), 1.5, 6, 1, 0xffd23f);
+      fx('explosion', pp.clone().add(V3(0, 0.2, 0)), 1.2); fx('shake', 0.9, 0.9);
+      interrupt();
+      if (Math.hypot(fp.x - pp.x, fp.z - pp.z) < 6 + C.radius) {
+        const dmg = 110 + lv * 15; C.hp = Math.max(0, C.hp - dmg);
+        fx('floatText', V3(fp.x, fp.y + 1.4 + C.radius * 0.4, fp.z), 'Chấn Địa -' + dmg, '#ffd23f');
+        C.state = 'stunned'; C.timer = 1.2; setGlow(0, 0, 0);
+        if (!C.onBoat) { const dx = fp.x - pp.x, dz = fp.z - pp.z, l = Math.hypot(dx, dz) || 1; C.knock.set(dx / l, 0, dz / l).multiplyScalar(9); }
+      }
+    } else if (d.id === 'lienhoan') {
+      S.atkCd = 0;
+    }
+    if (C.hp <= 0) winCombat();
+  }
   function fishAttackHit() {
     const st = G.state;
-    if (S.iframes > 0) { fx('floatText', P.obj.position.clone().add(V3(0, 2.1, 0)), 'Né!', '#88ddff'); return; }
+    if (S.iframes > 0) { fx('floatText', P.obj.position.clone().add(V3(0, 2.1, 0)), 'Né! +Nộ', '#88ddff'); if (G.skills) G.skills.addRage(10); return; }
+    if (skillOn('chandia')) { fx('floatText', P.obj.position.clone().add(V3(0, 2.1, 0)), 'Bất tử!', '#ffd23f'); return; }
     const dmg = Math.round(C.dmg * U.rand(0.85, 1.15));
     st.hp = Math.max(10, st.hp - dmg);
     fx('shake', 0.45, 0.3);
@@ -1395,6 +1578,9 @@
   }
 
   function endCombatMode() {
+    if (C && C.aura) C.aura.stop();
+    if (C && C.cast && C.cast.tele) C.cast.tele.stop();
+    if (C && C.model) C.model.visible = true; // có thể đang nhấp nháy do ẩn thân
     P.combat = null;
     C = null;
     S.pendingHit = null;
@@ -1445,6 +1631,26 @@
     const fp = fishWorldPos(V3());
     let dx = pp.x - fp.x, dz = pp.z - fp.z;
     const dist = Math.hypot(dx, dz) || 0.001;
+    // cá vận chiêu ~1s (hào quang bùng lên) rồi tung — X (Lôi Điện) phá được, Shift né được Cuồng Phong
+    if (C.boss && !C.enraged && C.hp < C.maxHp * 0.5) combatEnrage();
+    if (C.hidden > 0) { C.hidden -= dt; m.visible = C.hidden <= 0 || Math.sin(t * 30) > 0.3; } else if (!m.visible) m.visible = true;
+    if (C.skills.length && C.state !== 'stunned' && C.state !== 'escape') {
+      if (C.cast) {
+        if ((C.cast.t -= dt) <= 0) { if (C.cast.tele) C.cast.tele.stop(); combatFishSkill(C.cast.sk); if (!C) return; C.cast = null; C.skillT = U.rand(7, 11) * (C.enraged ? 0.6 : 1); }
+      } else if ((C.skillT -= dt) <= 0) {
+        const sk = C.skills[Math.floor(Math.random() * C.skills.length)];
+        const dur = (sk.cast + 0.2) * (C.enraged ? 0.8 : 1);
+        // chốt vùng đánh lúc bắt đầu vận chiêu: đòn vào người (sét, phóng xạ) đặt dưới chân mình; lửa phía trước cá; còn lại quanh cá
+        let zone;
+        if (sk.id === 'thiendien' || sk.id === 'phongxa') zone = { x: pp.x, y: pp.y, z: pp.z, r: 2.4 };
+        else if (sk.id === 'phunlua') zone = { x: fp.x + Math.sin(C.facing) * 3.5, y: fp.y, z: fp.z + Math.cos(C.facing) * 3.5, r: 3 };
+        else zone = { x: fp.x, y: fp.y, z: fp.z, r: C.radius + 3 };
+        const tele = (sk.id === 'batdiet' || sk.id === 'anthan') ? null : (G.fx && G.fx.telegraph ? G.fx.telegraph(V3(zone.x, (fishFloor(zone.x, zone.z) || zone.y), zone.z), zone.r, dur, sk.color) : null);
+        C.cast = { sk, t: dur, dur, zone, tele };
+        if (C.aura) C.aura.flare(dur);
+        fx('floatText', V3(fp.x, fp.y + 1.4 + C.radius, fp.z), sk.name + '!', hexS(sk.color));
+      }
+    }
     dx /= dist; dz /= dist;
     const reach = C.radius + 1.1;
     let move = 0;
@@ -1532,7 +1738,10 @@
     }
     if (C.flash > 0) { C.flash -= dt; setGlow(C.flash > 0 ? 0.8 : 0, C.flash > 0 ? 0.8 : 0, C.flash > 0 ? 0.8 : 0); }
     try { if (m.userData && m.userData.animate) m.userData.animate(t, C.state === 'strike' ? 1 : 0.6); } catch (e) { /* */ }
-    if (P.combat) P.combat.fishHp = C.hp;
+    if (P.combat) {
+      P.combat.fishHp = C.hp; P.combat.enraged = C.enraged;
+      P.combat.cast = C.cast ? { name: C.cast.sk.name, color: C.cast.sk.color, progress: 1 - C.cast.t / C.cast.dur } : null;
+    }
   }
 
   function disposeFishModel(model) {
@@ -1593,7 +1802,8 @@
     try { const a = G.fish && G.fish.getAmbient && G.fish.getAmbient(); return Array.isArray(a) ? a : []; } catch (e) { return []; }
   }
   P.getAimRay = function () {
-    aimCaster.setFromCamera({ x: G.input.mouse.nx, y: G.input.mouse.ny }, G.camera);
+    const locked = mouseLocked(); // khóa chuột (góc nhìn thứ nhất) → ngắm theo tâm màn hình
+    aimCaster.setFromCamera({ x: locked ? 0 : G.input.mouse.nx, y: locked ? 0 : G.input.mouse.ny }, G.camera);
     return aimCaster.ray;
   };
   function fire() {
@@ -1712,6 +1922,24 @@
     for (const id of owned) { const d = G.data.item && G.data.item(id); if (d && (d.speed || 0) > bs) { bs = d.speed || 0; best = id; } }
     return best;
   }
+  // ---- khóa chuột ở góc nhìn thứ nhất (kiểu Roblox): click vào màn hình để khóa, Esc để nhả ----
+  function mouseLocked() { return !!document.pointerLockElement; }
+  function exitMouseLock() { if (document.pointerLockElement && document.exitPointerLock) document.exitPointerLock(); }
+  // Trình duyệt có thể từ chối khóa chuột (khung nhúng, vừa nhả bằng Esc...): requestPointerLock trả Promise
+  // bị reject (không bắt thì văng "Uncaught (in promise)" mỗi cú click). Bị từ chối 2 lần liền → coi như
+  // không khóa được: click đi thẳng vào gameplay, xoay camera bằng chuột phải như góc thứ ba.
+  let lockFails = 0;
+  const onLockErr = () => { lockFails++; };
+  document.addEventListener('pointerlockerror', onLockErr);
+  document.addEventListener('pointerlockchange', () => { if (document.pointerLockElement) lockFails = 0; });
+  function onCanvasDown(e) {
+    const c = G.renderer && G.renderer.domElement;
+    if (!(G.state.firstPerson && !G.input.blocked && c && !document.pointerLockElement && c.requestPointerLock && e && e.button === 0)) return;
+    try { const pr = c.requestPointerLock(); if (pr && pr.catch) pr.catch(onLockErr); } catch (err) { onLockErr(); }
+    // cú click chỉ để khóa chuột: không cho lọt xuống gameplay (khỏi lỡ tay lấy đà quăng / bắn / đấm)
+    if (lockFails < 2) e.stopPropagation();
+  }
+
   function handleKeys(dt, blocked) {
     const st = G.state, mode = st.mode, inp = G.input;
     if (blocked) return;
@@ -1747,12 +1975,43 @@
     const cam = G.camera;
     if (!cam) return;
     const m = G.input.mouse, st = G.state, mode = st.mode, pp = P.obj.position;
-    if (!blocked && m.right) {
+    if ((blocked || !st.firstPerson) && mouseLocked()) exitMouseLock(); // mở bảng / về góc thứ ba → nhả chuột
+    if (!blocked && (m.right || mouseLocked())) {
       P.cameraYaw -= m.dx * 0.005;
       P.cameraPitch += m.dy * 0.004;
     }
     P.cameraPitch = clamp(P.cameraPitch, S.swimming ? -0.2 : -0.3, 1.35);
-    if (!blocked && m.wheel && mode !== 'fishing' && mode !== 'fight') P.cameraDist = clamp(P.cameraDist * (1 + m.wheel * 0.12), 2.2, 30);
+    const lineOut = G.fishing && G.fishing.isLineOut && G.fishing.isLineOut();
+    if (!blocked && m.wheel && !lineOut) {
+      // kiểu Roblox: lăn vào sát → góc nhìn thứ nhất; lăn ra → góc nhìn thứ ba
+      if (st.firstPerson) { if (m.wheel > 0) { st.firstPerson = false; P.cameraDist = 2.4; exitMouseLock(); } }
+      else {
+        P.cameraDist = clamp(P.cameraDist * (1 + m.wheel * 0.12), 2.2, 30);
+        if (m.wheel < 0 && P.cameraDist <= 2.21) { st.firstPerson = true; toast('Góc nhìn thứ nhất — click để khóa chuột, lăn chuột ra để trở lại', 'info'); }
+      }
+    }
+
+    // ---- góc nhìn thứ nhất (lăn chuột sát vào): camera ở mắt, ẩn đầu; bay/ngất thì tạm về góc nhìn thứ ba ----
+    const fpv = !!st.firstPerson && !S.flight && mode !== 'dead';
+    if (J.head && J.head.visible === fpv) J.head.visible = !fpv;
+    if (fpv) {
+      const f = P.cameraFocus;
+      if (f && f.isVector3 && !m.right && mode !== 'shoot' && Math.hypot(f.x - pp.x, f.z - pp.z) > 1) P.cameraYaw = dampAngle(P.cameraYaw, Math.atan2(f.x - pp.x, f.z - pp.z), 2, dt);
+      if (!P.boat && !S.swimming) S.targetFacing = P.cameraYaw; // thân quay theo hướng nhìn
+      const yaw = P.cameraYaw, a = clamp(P.cameraPitch - 0.3, -1.25, 1.2);
+      const fx0 = Math.sin(yaw), fz0 = Math.cos(yaw);
+      P.obj.updateMatrixWorld(true); // vị trí đầu của khung NÀY (không trễ 1 khung → không rung khi chạy)
+      J.head.getWorldPosition(tmpV);
+      tmpV.x += fx0 * 0.14; tmpV.y += 0.16; tmpV.z += fz0 * 0.14;
+      cam.position.copy(tmpV);
+      cam.lookAt(tmpV.x + fx0 * Math.cos(a), tmpV.y - Math.sin(a), tmpV.z + fz0 * Math.cos(a));
+      const dr0 = st.drunk || 0;
+      if (dr0 > 0.02) { cam.rotateZ(Math.sin(t * 0.9) * 0.1 * dr0); cam.rotateY(Math.sin(t * 0.6) * 0.04 * dr0); }
+      const fov0 = mode === 'shoot' ? 50 : 72;
+      if (Math.abs(fovSm - fov0) > 0.05) { fovSm = dt ? U.damp(fovSm, fov0, 8, dt) : fov0; cam.fov = fovSm; cam.updateProjectionMatrix(); }
+      S.camSnap = true; // khi đổi lại góc thứ ba thì camera đặt ngay đúng chỗ
+      return;
+    }
 
     let tx = pp.x, ty = pp.y + (S.swimming ? 1.0 : P.boat ? 1.2 : 1.55), tz = pp.z;
     if (mode === 'dead') ty = pp.y + 0.6;
@@ -1835,6 +2094,22 @@
   // ======================================================================
   // API khác
   // ======================================================================
+  // Trang phục theo G.state.wearing = { head, body, legs, feet, undies, chest }
+  const OUTFIT_COLOR = { junk_shirt: 0xdfe6ea, junk_pants: 0x3b5f8f, junk_hat: 0x9c8a5a, junk_sandal: 0x2f7fd8 };
+  function applyOutfit() {
+    if (!J.mShirt) return;
+    const w = G.state.wearing || {};
+    J.mShirt.color.setHex(OUTFIT_COLOR[w.body] || J.base.shirt);
+    J.mPants.color.setHex(OUTFIT_COLOR[w.legs] || J.base.pants);
+    J.mHat.color.setHex(OUTFIT_COLOR[w.head] || J.base.hat);
+    J.mSandal.color.setHex(w.feet === 'junk_sandal' ? OUTFIT_COLOR.junk_sandal : J.base.sandal);
+    J.wUndies.visible = w.undies === 'junk_undies';
+    J.wBra.visible = w.chest === 'junk_bra';
+    J.wShoes.forEach((o) => { o.visible = w.feet === 'junk_shoe'; });
+    J.wBoots.forEach((o) => { o.visible = w.feet === 'junk_boot'; });
+  }
+  P.applyOutfit = applyOutfit;
+
   P.teleport = function (v) {
     if (!v || !P.obj) return;
     P.obj.position.set(v.x, v.y, v.z);
@@ -1878,6 +2153,7 @@
     while (dying.length) { disposeFishModel(dying[0].model); dying.shift(); }
     while (projectiles.length) removeProjectile(0);
     removeBoat();
+    while (wrecks.length) G.disposeObject(wrecks.pop().obj);
     S.flight = null; S.dodge = null; S.override = null; S.spinX = 0; S.pendingHit = null;
   }
 
@@ -1944,6 +2220,8 @@
     updateCombat(dt, t, blocked);
     updateShoot(dt, blocked);
     updateProjectiles(dt);
+    if (wrecks.length) updateWrecks(dt);
+    if (J.basketFill) { const full = (st.fishBag && st.fishBag.length) > 0; if (J.basketFill.visible !== full) J.basketFill.visible = full; }
     P.onGround = S.onGround; P.swimming = S.swimming;
     updateAnim(dt, t);
     updateCamera(dt, t, blocked);
@@ -1958,6 +2236,12 @@
     G.addUpdate(update, 30);
     G.bus.on('env:changed', onEnvChanged);
     G.bus.on('player:dragged', onDragged);
+    G.bus.on('boat:capsize', onCapsize);
+    G.bus.on('skill:cast', onSkillCast);
+    G.bus.on('outfit:changed', applyOutfit);
+    if (G.renderer && G.renderer.domElement) G.renderer.domElement.addEventListener('mousedown', onCanvasDown);
+    G.bus.on('game:ready', applyOutfit);
+    applyOutfit();
     G.bus.on('combat:start', onCombatStart);
     G.bus.on('warden:caught', onWardenCaught);
     G.bus.on('mode:changed', onModeChanged);

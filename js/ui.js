@@ -63,9 +63,15 @@
     arrow: '<path d="M12 20V5M6 11l6-6 6 6"/>',
     ticket: '<path d="M3 8a2 2 0 002-2h14a2 2 0 002 2v8a2 2 0 00-2 2H5a2 2 0 00-2-2z"/><path d="M14 6v12" stroke-dasharray="2 2"/>',
   };
-  const ic = (n, cls) => `<svg class="i${cls ? ' ' + cls : ''}" viewBox="0 0 24 24" aria-hidden="true">${P[n] || ''}</svg>`;
+  const ic = (n, cls) => `<svg class="i${cls ? ' ' + cls : ''}" viewBox="0 0 24 24" aria-hidden="true">${P[n] || (G.ICONS && G.ICONS[n]) || ''}</svg>`;
   // hình cá cho thẻ sách cá / bảng vật cá — tô màu theo loài
-  const fishFig = (color, unknown) => `<svg class="fig" viewBox="0 0 64 32" aria-hidden="true"><path d="M4 16C13 5 32 2 45 12l14-8-4 12 4 12-14-8C32 30 13 27 4 16z" fill="${unknown ? 'rgba(21,41,44,.22)' : color}" stroke="#15292c" stroke-width="1.6" stroke-linejoin="round"/>${unknown ? '<text x="25" y="22" font-size="15" font-weight="800" fill="#15292c" text-anchor="middle" font-family="Be Vietnam Pro, sans-serif">?</text>' : '<circle cx="12.5" cy="14" r="1.7" fill="#15292c"/><path d="M20 9c2 4 2 10 0 14" fill="none" stroke="#15292c" stroke-width="1.2" opacity=".55"/>'}</svg>`;
+  // có id loài → ảnh chụp mô hình 3D thật của loài đó (chưa câu: bóng đen bí ẩn); không có → hình SVG chung
+  const fishFig = (color, unknown, id) => {
+    const src = id && G.fish && G.fish.portrait ? G.fish.portrait(id) : null;
+    if (src) return `<img class="fig pic${unknown ? ' unk' : ''}" src="${src}" alt="" aria-hidden="true">`;
+    return fishSvg(color, unknown);
+  };
+  const fishSvg = (color, unknown) => `<svg class="fig" viewBox="0 0 64 32" aria-hidden="true"><path d="M4 16C13 5 32 2 45 12l14-8-4 12 4 12-14-8C32 30 13 27 4 16z" fill="${unknown ? 'rgba(21,41,44,.22)' : color}" stroke="#15292c" stroke-width="1.6" stroke-linejoin="round"/>${unknown ? '<text x="25" y="22" font-size="15" font-weight="800" fill="#15292c" text-anchor="middle" font-family="Be Vietnam Pro, sans-serif">?</text>' : '<circle cx="12.5" cy="14" r="1.7" fill="#15292c"/><path d="M20 9c2 4 2 10 0 14" fill="none" stroke="#15292c" stroke-width="1.2" opacity=".55"/>'}</svg>`;
 
   const CAT = {
     be: { label: 'Cá bé', color: '#8cc7d9' },
@@ -85,10 +91,10 @@
   const FSTATE = { idle: 'Sẵn sàng quăng', ready: 'Sẵn sàng quăng', charging: 'Đang lấy đà…', aiming: 'Đang lấy đà…', casting: 'Đang quăng…', flying: 'Mồi đang bay…', waiting: 'Chờ cá cắn…', wait: 'Chờ cá cắn…', nibble: 'Cá đang rỉa mồi…', bite: 'Cá cắn!', strike: 'Cá cắn!', hooked: 'Dính cá!', fight: 'Đang vật cá', reeling: 'Đang cuộn…', retrieve: 'Đang thu dây…', landing: 'Kéo cá lên!' };
 
   const HINTS = {
-    explore: [['WASD', 'đi'], ['Shift', 'chạy'], ['Space', 'nhảy'], ['F', 'cầm cần'], ['E', 'nói chuyện'], ['G', 'bắn cá'], ['H', 'trợ giúp']],
-    fishing: [['Giữ chuột trái', 'lấy đà, nhả để quăng'], ['Lăn chuột', 'độ sâu mồi'], ['Space', 'giật câu'], ['B', 'mồi'], ['R', 'đổi cần'], ['F', 'cất cần']],
-    fight: [['Giữ chuột trái', 'cuộn dây'], ['A / D', 'ghì ngược hướng cá'], ['W', 'giật cần'], ['S', 'hạ cần khi cá nhảy']],
-    combat: [['Chuột trái', 'đánh'], ['Shift', 'né'], ['WASD', 'di chuyển']],
+    explore: [['WASD', 'đi'], ['Shift', 'chạy'], ['Space', 'nhảy'], ['F', 'cầm cần'], ['E', 'tương tác'], ['G', 'bắn cá'], ['Lăn chuột', 'zoom / góc nhìn 1'], ['Tab', 'túi đồ']],
+    fishing: [['Giữ chuột trái', 'lấy đà, nhả để quăng'], ['Lăn chuột', 'độ sâu mồi (khi thả dây)'], ['Space', 'giật câu'], ['Tab', 'đổi cần, mồi'], ['F', 'cất cần']],
+    fight: [['Giữ chuột trái', 'cuộn dây'], ['A / D', 'ghì ngược hướng cá'], ['W', 'giật cần'], ['S', 'hạ cần khi cá nhảy'], ['Q E', 'skill'], ['R', 'tuyệt chiêu']],
+    combat: [['Chuột trái', 'đánh'], ['Shift', 'né'], ['Q E', 'skill'], ['R', 'tuyệt chiêu'], ['WASD', 'di chuyển']],
     shoot: [['Chuột trái', 'bắn'], ['Chuột phải kéo', 'xoay'], ['G', 'thoát']],
     boat: [['WASD', 'lái thuyền'], ['F', 'câu cá'], ['E', 'rời thuyền']],
     swim: [['WASD', 'bơi'], ['Space', 'ngoi lên'], ['', 'bơi vào bờ!']],
@@ -173,6 +179,10 @@ z-index:2;color:var(--paper);font-family:var(--fu);font-size:var(--fs);line-heig
 #hotbar .slot.empty:hover{border-color:rgba(239,228,198,.14)}
 #hotbar .slot .k{position:absolute;left:.3em;top:.05em;font-size:.72em;font-weight:800;color:rgba(239,228,198,.6)}
 #hotbar .slot .c{position:absolute;right:.3em;bottom:.05em;font-size:.78em;font-weight:800;text-shadow:0 1px 0 #000}
+#equip .bagrow{width:100%;background:none;border:0;border-bottom:1px dashed rgba(239,228,198,.25);margin-bottom:.25em;padding:0 0 .25em;color:inherit;font:inherit;text-align:left;cursor:pointer;pointer-events:auto}
+#equip .bagrow.bump{animation:bagBump .7s ease-out}
+@keyframes bagBump{0%{background:rgba(240,179,35,.55)}100%{background:rgba(240,179,35,0)}}
+@media (prefers-reduced-motion:reduce){#equip .bagrow.bump{animation:none;background:rgba(240,179,35,.3)}}
 #equip{position:absolute;left:var(--m);bottom:var(--m);width:16.5em;padding:.5em .8em;font-size:.92em}
 #equip .er{display:grid;grid-template-columns:1.25em minmax(0,1fr) auto;gap:.45em;align-items:center;line-height:1.6}
 #equip .er .i{color:rgba(239,228,198,.7)}
@@ -256,6 +266,36 @@ z-index:2;color:var(--paper);font-family:var(--fu);font-size:var(--fs);line-heig
 #fight .f-arrow.idle{opacity:.35}
 #fight .f-jump{margin-top:.45em;padding:.25em .6em;background:var(--son);color:#fff;font-weight:800;text-align:center;border-radius:3px;line-height:1.45;animation:alarm .4s steps(2) infinite}
 #fight .f-hint{margin-top:.4em;text-align:center;font-size:.88em;line-height:1.45;color:rgba(239,228,198,.85)}
+#skills{position:absolute;left:var(--m);top:50%;transform:translateY(-50%);display:flex;flex-direction:column;gap:.4em;width:14em}
+#skills .sk-head{padding:.45em .6em;line-height:1.35}
+#skills .sk-head .lv{display:flex;justify-content:space-between;font-weight:600;font-size:.85em}
+#skills .sk-head .xp{height:3px;background:rgba(239,228,198,.15);border-radius:2px;margin:.25em 0 .4em}
+#skills .sk-head .xp i{display:block;height:100%;background:var(--vang);transform-origin:left}
+#skills .sk-head .rg{display:flex;align-items:center;gap:.45em;font-weight:800;font-size:.85em;color:#ff9b5a}
+#skills .sk-head .rgt{flex:1;height:.55em;background:rgba(0,0,0,.4);border:1px solid rgba(255,155,90,.45);border-radius:3px;overflow:hidden}
+#skills .sk-head .rgt i{display:block;height:100%;background:linear-gradient(90deg,#c8352a,#ff9b5a);transform-origin:left}
+#skills .sk{position:relative;overflow:hidden;display:grid;grid-template-columns:2.1em 1fr;align-items:center;gap:.55em;padding:.4em .55em;line-height:1.3}
+#skills .sk .ico{position:relative;width:2.1em;height:2.1em;border-radius:5px;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.35);border:1px solid rgba(239,228,198,.2)}
+#skills .sk .ico .i{width:1.45em;height:1.45em}
+#skills .sk .ico .kb{position:absolute;left:-.35em;bottom:-.35em;font-size:.68em}
+#skills .sk .nm{font-weight:600;font-size:.86em}
+#skills .sk .cost{font-size:.74em;opacity:.7}
+#skills .sk .cd{position:absolute;inset:0;background:rgba(0,0,0,.6);transform-origin:left;transform:scaleX(0)}
+#skills .sk .sec{position:absolute;right:.55em;top:50%;transform:translateY(-50%);font-weight:800;font-size:.85em}
+#skills .sk.dim .nm,#skills .sk.dim .ico{opacity:.45}
+#skills .sk.on{outline:2px solid var(--vang);box-shadow:0 0 .9em rgba(240,179,35,.55)}
+#skills .sk.ult .ico{border-color:rgba(63,208,255,.5)}
+#skills .sk.ult.ready{outline:2px solid #3fd0ff;box-shadow:0 0 1.1em rgba(63,208,255,.65);animation:ultPulse 1.1s ease-in-out infinite alternate}
+@keyframes ultPulse{from{box-shadow:0 0 .5em rgba(63,208,255,.4)}to{box-shadow:0 0 1.4em rgba(63,208,255,.85)}}
+@media (prefers-reduced-motion:reduce){#skills .sk.ult.ready{animation:none}}
+#fight .f-arrow.unk svg{display:none}
+#fight .f-arrow.unk:after{content:'?';font-family:var(--fd);font-weight:800;font-size:1.4em;line-height:1}
+#fcast{position:absolute;left:50%;top:calc(var(--m) + 9.8em);transform:translateX(-50%);width:min(24em,86vw);padding:.4em .7em;text-align:center;line-height:1.35}
+#fcast .fn{font-family:var(--fd);font-weight:800;font-size:1.05em}
+#fcast .bar{height:.5em;background:rgba(0,0,0,.45);border-radius:3px;overflow:hidden;margin:.3em 0}
+#fcast .bar i{display:block;height:100%;transform-origin:left;background:currentColor}
+#fcast .tip{font-size:.8em;opacity:.85}
+#fcast .boss{display:inline-block;margin-left:.4em;padding:0 .4em;border-radius:3px;background:#c8352a;color:#fff;font-size:.72em;font-weight:800;vertical-align:.15em}
 #combat{position:absolute;left:50%;top:calc(var(--m) + 3.3em);transform:translateX(-50%);width:min(26em,90vw);padding:.5em .9em .6em}
 #combat .c-n{font-family:var(--fd);font-weight:600;font-size:1.2em;line-height:1.45;text-align:center}
 /* hội thoại */
@@ -305,8 +345,16 @@ z-index:2;color:var(--paper);font-family:var(--fu);font-size:var(--fs);line-heig
 .idc-h{display:flex;justify-content:space-between;align-items:center;gap:.5em;font-size:.78em;font-weight:800;line-height:1.5;border-bottom:1px solid rgba(21,41,44,.35);padding-bottom:.15em;margin-bottom:.4em;color:rgba(21,41,44,.72)}
 .idc-h .cat{display:inline-flex;align-items:center;gap:.35em}
 .dot{display:inline-block;width:.75em;height:.75em;border-radius:50%;border:1px solid rgba(21,41,44,.6)}
-.idc-fig{display:flex;align-items:center;justify-content:center;height:4.2em;margin-bottom:.4em;border:1px solid rgba(21,41,44,.15);background:repeating-linear-gradient(0deg,transparent 0 .85em,rgba(79,179,191,.22) .85em calc(.85em + 1px))}
+.idc-fig{display:flex;align-items:center;justify-content:center;height:5.8em;margin-bottom:.4em;border:1px solid rgba(21,41,44,.15);background:repeating-linear-gradient(0deg,transparent 0 .85em,rgba(79,179,191,.22) .85em calc(.85em + 1px))}
 .idc-fig .fig{width:6.4em;height:3.2em}
+.fig.pic{object-fit:contain;height:auto;aspect-ratio:2/1;filter:drop-shadow(0 2px 2px rgba(0,0,0,.25))}
+.fig.pic.unk{filter:brightness(0);opacity:.4}
+.idc-fig.t-quai_vat{background:radial-gradient(ellipse at 50% 60%,#7a1a10,#1e0604 75%);border-color:#c8352a}
+.idc-fig.t-khong_lo{background:radial-gradient(ellipse at 50% 60%,#1f5a8a,#06182a 75%)}
+.idc-fig.t-dot_bien{background:radial-gradient(ellipse at 50% 60%,#3a7a1a,#0a1a06 75%)}
+.idc-fig.t-meme{background:radial-gradient(ellipse at 50% 60%,#c05aa8,#3a0a30 75%)}
+.idc-fig:is(.t-quai_vat,.t-khong_lo,.t-dot_bien,.t-meme) .fig.pic.unk{filter:brightness(0) drop-shadow(0 0 3px rgba(255,255,255,.6));opacity:.75}
+.idc-fig .fig.pic{width:11em;height:5.5em}
 .idc-nm{font-family:var(--fd);font-weight:600;font-size:1.25em;line-height:1.4}
 .idc.unk .idc-nm{color:rgba(21,41,44,.45)}
 .idc dl{display:grid;grid-template-columns:auto 1fr;gap:.05em .7em;margin:.3em 0 0;font-size:.86em}
@@ -414,23 +462,25 @@ z-index:2;color:var(--paper);font-family:var(--fu);font-size:var(--fs);line-heig
     E.wxIcon = E.cond.querySelector('.wi'); E.windV = E.cond.querySelector('.wv'); E.windA = E.cond.querySelector('.wa');
 
     E.menu = mk(hud, 'div', 'hud-menu', 'plate ui-interactive', `
-      <button class="btn" data-act="open" data-id="inventory" title="Túi đồ (I)" aria-label="Túi đồ">${ic('bag')}<small>I</small></button>
-      <button class="btn" data-act="open" data-id="craft" title="Chế tạo (C)" aria-label="Chế tạo">${ic('hammer')}<small>C</small></button>
+      <button class="btn" data-act="open" data-id="inventory" title="Túi đồ (Tab)" aria-label="Túi đồ">${ic('bag')}<small>Tab</small></button>
+      <button class="btn" data-act="open" data-id="craft" title="Chế tạo (gặp bác thợ rèn)" aria-label="Chế tạo">${ic('hammer')}</button>
       <button class="btn" data-act="open" data-id="map" title="Bản đồ (M)" aria-label="Bản đồ">${ic('map')}<small>M</small></button>
-      <button class="btn" data-act="open" data-id="fishdex" title="Sách cá (K)" aria-label="Sách cá">${ic('book')}<small>K</small></button>
-      <button class="btn" data-act="open" data-id="help" title="Trợ giúp (H)" aria-label="Trợ giúp">${ic('help')}<small>H</small></button>
+      <button class="btn" data-act="open" data-id="fishdex" title="Sách cá" aria-label="Sách cá">${ic('book')}</button>
+      <button class="btn" data-act="open" data-id="help" title="Trợ giúp (F1)" aria-label="Trợ giúp">${ic('help')}<small>F1</small></button>
       <button class="btn" data-act="open" data-id="pause" title="Tạm dừng (Esc)" aria-label="Tạm dừng">${ic('pause')}<small>Esc</small></button>`);
     E.hotbar = mk(hud, 'div', 'hotbar', 'plate ui-interactive');
     E.equip = mk(hud, 'div', 'equip', 'plate', `
+      <button class="er bagrow ui-interactive" data-act="openInv" title="Mở túi đồ (Tab)">${ic('fish')}<span class="nm bagn">Giỏ cá 0/30</span><span class="kb">Tab</span></button>
       <div class="er">${ic('rod')}<span class="nm rodn">—</span><span class="tag rodt"></span></div>
       <div class="er">${ic('spool')}<span class="nm linen">—</span><span></span></div>
       <div class="er">${ic('bait')}<span class="nm baitn">—</span><span class="ct baitc"></span></div>
       <div class="fs hide"><div class="st"></div><div class="dp hide">Độ sâu mồi <span class="depth">0 m</span> <span class="mut">(lăn chuột)</span></div></div>`);
+    E.eBag = E.equip.querySelector('.bagrow'); E.eBagN = E.equip.querySelector('.bagn');
     E.eRod = E.equip.querySelector('.rodn'); E.eRodT = E.equip.querySelector('.rodt'); E.eLine = E.equip.querySelector('.linen');
     E.eBait = E.equip.querySelector('.baitn'); E.eBaitC = E.equip.querySelector('.baitc');
     E.eFs = E.equip.querySelector('.fs'); E.eSt = E.equip.querySelector('.st'); E.eDp = E.equip.querySelector('.dp'); E.eDepth = E.equip.querySelector('.depth');
     E.colBR = mk(hud, 'div', 'col-br');
-    E.pants = mk(E.colBR, 'button', 'pants', 'btn ui-interactive', `<span class="pi">${ic('pants')}${ic('slash', 'x')}</span>Nhét cá vào quần<span class="kb">P</span>`);
+    E.pants = mk(E.colBR, 'button', 'pants', 'btn ui-interactive', `<span class="pi">${ic('pants')}${ic('slash', 'x')}</span>Nhét cá vào quần`);
     E.pants.dataset.act = 'pants';
     E.pants.title = 'Luật cấm, nhưng cứ thử xem';
     E.hints = mk(E.colBR, 'div', 'hints', 'plate');
@@ -456,6 +506,9 @@ z-index:2;color:var(--paper);font-family:var(--fu);font-size:var(--fs);line-heig
     E.fStamFill = E.fight.querySelector('.stam .fill'); E.fStamP = E.fight.querySelector('.stam .p');
     E.fArrow = E.fight.querySelector('.f-arrow'); E.fKA = E.fight.querySelector('.ka'); E.fKD = E.fight.querySelector('.kd');
     E.fJump = E.fight.querySelector('.f-jump'); E.fHint = E.fight.querySelector('.f-hint');
+    E.skills = mk(root, 'div', 'skills', 'hide');
+    E.fcast = mk(root, 'div', 'fcast', 'plate hide', '<div class="fn"></div><div class="bar"><i></i></div><div class="tip"></div>');
+    E.fcName = E.fcast.querySelector('.fn'); E.fcBar = E.fcast.querySelector('.bar i'); E.fcTip = E.fcast.querySelector('.tip');
     E.combat = mk(root, 'div', 'combat', 'plate hide', `
       <div class="c-n">—</div>
       <div class="f-row fish"><span class="l">Cá</span><div class="trk"><div class="fill"></div></div><span class="p"></span></div>
@@ -512,7 +565,7 @@ z-index:2;color:var(--paper);font-family:var(--fu);font-size:var(--fs);line-heig
     if (!built) return;
     const sc = topScope(); if (!sc) return;
     const inInput = e.target && e.target.tagName === 'INPUT';
-    const isTab = e.code === 'Tab';
+    const isTab = false; // Tab = túi đồ; chọn nút trong menu bằng phím mũi tên
     const isArrow = e.code === 'ArrowDown' || e.code === 'ArrowUp' || e.code === 'ArrowLeft' || e.code === 'ArrowRight';
     if (!isTab && !(isArrow && !inInput)) return;
     const list = focusables(sc); if (!list.length) return;
@@ -640,8 +693,7 @@ z-index:2;color:var(--paper);font-family:var(--fu);font-size:var(--fs);line-heig
   // icon vật phẩm: emoji trong dữ liệu là nội dung; không có thì dùng SVG theo loại
   function itemIcon(it) {
     if (!it) return ic('bag');
-    if (it.icon) return esc(it.icon);
-    return ic({ rod: 'rod', line: 'spool', boat: 'boat', bait: 'bait' }[it.type] || 'bag');
+    return ic(G.iconKey ? G.iconKey(it) : 'bag'); // icon SVG tự vẽ (không dùng emoji của hệ điều hành)
   }
   function curRod() { return item((G.state.equipped || {}).rod) || {}; }
   function sellBox() {
@@ -670,7 +722,7 @@ z-index:2;color:var(--paper);font-family:var(--fu);font-size:var(--fs);line-heig
           const sp = G.fish && G.fish.get ? G.fish.get(f.speciesId) : null;
           const c = CAT[sp && sp.category] || CAT.thuong;
           return lrow({
-            ic: fishFig(hexCss(sp && sp.color) || c.color),
+            ic: fishFig(hexCss(sp && sp.color) || c.color, false, sp && sp.id),
             name: esc(f.name || (sp && sp.name) || 'Cá'),
             tags: `<span class="tag"><span class="dot" style="background:${c.color}"></span> ${c.label}</span>`,
             side: `<span class="w">${wfmt(f.weight)}</span><span class="pr">${money(fishValue(f))}</span>${has(S(), 'sell') ? `<button class="btn sm pri" data-act="sellFish" data-id="${i}">Bán</button>` : ''}${has(S(), 'cook') ? `<button class="btn sm" data-act="cook" data-id="${i}">Nướng</button>` : ''}`,
@@ -686,9 +738,18 @@ z-index:2;color:var(--paper);font-family:var(--fu);font-size:var(--fs);line-heig
           let btn = '';
           if (it.type === 'consumable' && it.effect) btn = `<button class="btn sm go" data-act="use" data-id="${esc(id)}">Dùng</button>`;
           else if (it.type === 'bait') btn = st.equipped.bait === id ? '<span class="tag ok">Đang gắn</span>' : `<button class="btn sm" data-act="setBait" data-id="${esc(id)}">Gắn mồi</button>`;
-          return lrow({ ic: itemIcon(it), name: esc(it.name), desc: esc(it.desc || (it.type === 'junk' ? 'Rác câu được. Bán hoặc đem tới thợ rèn.' : it.type === 'material' ? 'Nguyên liệu chế tạo.' : '')), side: `<b>×${inv[id]}</b>${btn}` });
+          else if (it.wear) btn = `<button class="btn sm go" data-act="wear" data-id="${esc(id)}">Mặc</button>`;
+          const desc = it.wear ? it.wearDesc : it.desc || (it.type === 'junk' ? 'Rác câu được. Bán hoặc đem tới thợ rèn.' : it.type === 'material' ? 'Nguyên liệu chế tạo.' : '');
+          return lrow({ ic: itemIcon(it), name: esc(it.name), desc: esc(desc), side: `<b>×${inv[id]}</b>${btn}` });
         }).join('');
       } else h += '<div class="empty">Chưa có gì. Ghé tiệm đồ câu mua mồi nhé.</div>';
+      const worn = Object.keys(st.wearing || {}).filter((k) => st.wearing[k]);
+      if (worn.length) {
+        h += '<h3>Đang mặc</h3>' + worn.map((slot) => {
+          const it = item(st.wearing[slot]) || { name: st.wearing[slot] };
+          return lrow({ cls: 'cur', ic: itemIcon(it), name: esc(it.name), desc: esc(it.wearDesc || ''), side: `<button class="btn sm" data-act="unwear" data-id="${esc(slot)}">Cởi</button>` });
+        }).join('');
+      }
       h += rodLineHtml(true);
       const boats = st.ownedBoats || [];
       if (boats.length) {
@@ -756,7 +817,7 @@ z-index:2;color:var(--paper);font-family:var(--fu);font-size:var(--fs);line-heig
         else if (!e.ticket) cost = 'Miễn phí';
         else { cost = money(e.ticket); can = (st.money || 0) >= e.ticket; }
         return lrow({
-          cls: cur ? 'cur' : '', ic: esc(e.icon || ''), name: esc(e.name), desc: esc(e.desc),
+          cls: cur ? 'cur' : '', ic: ic(G.iconKey ? G.iconKey(e) : 'map'), name: esc(e.name), desc: esc(e.desc),
           tags: `<span class="tag">${WATER[e.waterBody] || e.waterBody}</span><span class="tag">Nước ~${e.baseTemp}°C</span>${e.managedZones ? `<span class="tag no">${e.managedZones} khu cấm câu</span>` : '<span class="tag ok">Không có quản lý</span>'}`,
           side: `<span class="pr" style="${can ? '' : 'color:#a8291f'}">${cost}</span>${cur ? '<span class="tag ok">Đang ở đây</span>' : `<button class="btn sm ${can ? 'pri' : ''}" data-act="travel" data-id="${esc(e.id)}" ${can ? '' : 'disabled'}>Đi</button>`}`,
         });
@@ -791,11 +852,11 @@ z-index:2;color:var(--paper);font-family:var(--fu);font-size:var(--fs);line-heig
         const no = 'Số ' + String(i + 1).padStart(2, '0');
         const head = `<div class="idc-h"><span class="cat"><span class="dot" style="background:${c.color}"></span>${c.label}</span><span>${no}</span></div>`;
         if (!disc[s.id]) {
-          return `<div class="idc unk">${head}<div class="idc-fig">${fishFig('', true)}</div><div class="idc-nm">Chưa rõ tên</div>
+          return `<div class="idc unk">${head}<div class="idc-fig t-${s.category}">${fishFig('', true, s.id)}</div><div class="idc-nm">Chưa rõ tên</div>
             <dl><dt>Gặp ở</dt><dd>${(s.envs || []).slice(0, 2).map(envName).join(', ') || '?'}</dd><dt>Giờ ăn</dt><dd>${timeTxt(s)}${s.difficulty >= 7 ? ', rất khó câu' : ''}</dd></dl></div>`;
         }
         const baits = (s.baits || []).map((b) => { const it = item(b); return it ? esc(it.name) : ''; }).filter(Boolean).join(', ');
-        return `<div class="idc">${head}<span class="stamp">Đã câu</span><div class="idc-fig">${fishFig(hexCss(s.color))}</div><div class="idc-nm">${esc(s.name)}</div>
+        return `<div class="idc">${head}<span class="stamp">Đã câu</span><div class="idc-fig t-${s.category}">${fishFig(hexCss(s.color), false, s.id)}</div><div class="idc-nm">${esc(s.name)}</div>
           ${s.desc ? `<div class="ds">${esc(s.desc)}</div>` : ''}
           <dl><dt>Cân nặng</dt><dd>${wfmt(s.minW)} – ${wfmt(s.maxW)}</dd><dt>Giá</dt><dd>${money(s.price)}/kg</dd>
           <dt>Nơi ở</dt><dd>${(s.envs || []).map(envName).join(', ')} (${(s.waterBodies || []).map((w) => WATER[w] || w).join(', ')})</dd>
@@ -805,18 +866,23 @@ z-index:2;color:var(--paper);font-family:var(--fu);font-size:var(--fs);line-heig
       return { title: 'Sách cá', sub: `Đã ghi danh ${n}/${sp.length} loài`, html: sp.length ? h : '<div class="empty">Chưa có dữ liệu cá.</div>' };
     },
     help() {
-      const keys = [['WASD', 'Di chuyển'], ['Shift', 'Chạy, né'], ['Space', 'Nhảy, bơi lên, giật câu'], ['Chuột phải kéo', 'Xoay camera'], ['Lăn chuột', 'Zoom, chỉnh độ sâu mồi'], ['F', 'Cầm hoặc cất cần'], ['Giữ chuột trái', 'Lấy đà quăng, cuộn dây'], ['A / D', 'Ghì cần khi vật cá'], ['W', 'Giật cần (pump)'], ['S', 'Hạ cần khi cá nhảy'], ['R', 'Đổi cần'], ['B', 'Đổi mồi'], ['E', 'Nói chuyện, lên/xuống thuyền'], ['G', 'Chế độ bắn cá'], ['I', 'Túi đồ'], ['C', 'Chế tạo'], ['M', 'Bản đồ'], ['K', 'Sách cá'], ['P', 'Nhét cá vào quần (cấm)'], ['1 – 5', 'Ăn uống nhanh'], ['H / F1', 'Trợ giúp'], ['N', 'Bật/tắt âm thanh'], ['Esc', 'Tạm dừng, đóng bảng'], ['Tab / mũi tên', 'Chọn nút trong bảng']];
+      const keys = [['WASD', 'Di chuyển'], ['Shift', 'Chạy, né'], ['Space', 'Nhảy, bơi lên, giật câu khi cá cắn'], ['Chuột trái', 'Quăng (giữ lấy đà), cuộn dây, đánh, bắn'], ['Chuột phải kéo', 'Xoay camera'], ['Lăn chuột', 'Mặc định góc nhìn thứ nhất (click để khóa chuột); lăn ra để về góc thứ ba, lăn sát vào để trở lại. Khi đang thả dây: chỉnh độ sâu mồi'], ['F', 'Cầm hoặc cất cần'], ['E', 'Nói chuyện, lên/xuống thuyền'], ['A / D', 'Ghì cần ngược hướng cá khi vật'], ['W / S', 'Giật cần / hạ cần khi cá nhảy'], ['Q', 'Skill: Thần Lực Ghì Cần / Liên Hoàn Quyền'], ['E', 'Skill: Lôi Điện Ngư Ông — phá chiêu cá'], ['R', 'Tuyệt chiêu (cần đầy Nộ)'], ['G', 'Chế độ bắn cá'], ['Tab', 'Túi đồ: đổi cần, dây, mồi, mặc đồ'], ['M', 'Bản đồ'], ['1 – 5', 'Ăn uống nhanh'], ['Esc', 'Menu: sách cá, đồ họa, âm thanh'], ['F1', 'Trợ giúp']];
       let h = '<h3>Điều khiển</h3><div class="keys">' + keys.map((k) => `<div><span class="kb">${k[0]}</span><span>${k[1]}</span></div>`).join('') + '</div>';
       h += `<h3>Mẹo câu</h3><ul class="tips">
         <li>Giữ chuột trái để lấy đà, nhả khi kim nằm trong <b>vùng xanh</b> thì quăng chuẩn. Lực càng mạnh càng khó trúng.</li>
         <li>Phao chìm và hiện <b>Space – Giật!</b> thì bấm Space ngay. Cá càng khó, vòng thu càng nhanh.</li>
         <li>Khi vật cá: cá chạy bên nào thì ghì cần bên ngược lại (A/D). Thanh căng chạm vạch đỏ thì nhả chuột.</li>
         <li>Để ý nhiệt độ nước, thủy triều, ngày đêm và độ sâu mồi. Mỗi loài thích một kiểu.</li>
-        <li>Mồi phải hợp kiểu câu của cần (phao, lure, dọc, ngang). Xem bảng mồi (B).</li>
+        <li>Mồi phải hợp kiểu câu của cần (phao, lure, dọc, ngang). Đổi mồi trong túi đồ (Tab) hoặc bấm vào khối trang bị.</li>
         <li>Rượu hồi thể lực nhưng say thì quăng lệch. Trà đá giải rượu. Bánh mì pate 15k hồi máu và no.</li>
-        <li>Khu có quản lý: câu trộm sẽ bị đuổi. Chạy xa hơn 40 m để cắt đuôi, hoặc đội mũ cối ngụy trang.</li>
+        <li>Khu có quản lý: câu trộm sẽ bị đuổi. Chạy xa hơn 45 m hoặc trốn sau nhà để cắt đuôi, hoặc đội mũ cối ngụy trang.</li>
         <li>Câu được rác thì giữ lại. Thợ rèn đổi được cần thép, dây cáp, ca nô, thậm chí thuốc nổ.</li>
-        <li>Cá vạn cân cần cần Titan và cáp tàu sân bay. Có con khỏe tới mức lôi bạn xuống nước.</li></ul>`;
+        <li>Cá vạn cân cần cần Titan và cáp tàu sân bay. Có con khỏe tới mức lôi bạn xuống nước.</li>
+        <li><b>Nộ</b> tích lên khi bạn ghì cần đúng hướng, hạ cần đúng lúc cá nhảy, đánh trúng, né đòn và nhất là khi <b>phá chiêu cá</b>. Q, E tốn Nộ; R (tuyệt chiêu) cần đầy Nộ.</li>
+        <li>Cá to có hào quang và tung chiêu: thấy <b>vòng đỏ</b> hiện ra là cá đang vận chiêu — bấm E (Lôi Điện) để phá, hoặc chạy ra khỏi vòng khi đánh trên bờ. Cá trùm đuối sức sẽ nổi Cuồng Nộ.</li>
+        <li>Cá hàng chục tấn mà đứng trên bờ: bật Q (Thần Lực — không mất sức, không bị kéo), cạn thể lực thì uống rượu rắn/rượu đế bằng phím 1–5. Hoặc câu từ tàu thép cho chắc.</li>
+        <li>Cá nặng hơn sức chở của thuyền sẽ làm thuyền chao rồi lật. Nhả dây hoặc dùng Q để giữ thăng bằng; cá hàng tấn cần tàu thép.</li>
+        <li>Giày, dép, áo, quần, sịp câu được đều mặc được (Tab → Mặc). Sịp hoa mặc ra ngoài quần thì cá cắn nhiều hơn.</li></ul>`;
       h += '<div class="rule">Luật vàng: không được nhét cá vào quần!</div>';
       return { title: 'Hướng dẫn', sub: 'Câu Cá Vạn Cân 3D', html: h };
     },
@@ -937,6 +1003,9 @@ z-index:2;color:var(--paper);font-family:var(--fu);font-size:var(--fs);line-heig
       startGame(true);
     },
     hot(id) { if (id) call(S(), 'use', id); },
+    wear(id) { call(S(), 'wear', id); },
+    openInv() { openPanel('inventory'); },
+    unwear(slot) { call(S(), 'unwear', slot); },
   };
   function onClick(e) {
     const b = e.target.closest && e.target.closest('[data-act]');
@@ -981,7 +1050,7 @@ z-index:2;color:var(--paper);font-family:var(--fu);font-size:var(--fs);line-heig
     if (fresh && G.world && G.world.loadEnvironment && G.state.env !== ((G.world.current && G.world.current.id) || '')) {
       try { G.world.loadEnvironment(G.state.env); } catch (err) { console.error(err); }
     } else bigMessage(e.name, e.desc, '#f0b323');
-    setTimeout(() => toast('Nhấn F để cầm cần, H để xem hướng dẫn', 'info'), 1200);
+    setTimeout(() => toast('Nhấn F để cầm cần, F1 xem hướng dẫn', 'info'), 1200);
     hudT = 0; lastMoney = null;
   }
 
@@ -1024,7 +1093,19 @@ z-index:2;color:var(--paper);font-family:var(--fu);font-size:var(--fs);line-heig
     if (lastMoney != null) { E.money.classList.remove('up', 'down'); void E.money.offsetWidth; E.money.classList.add(st.money > lastMoney ? 'up' : 'down'); }
     lastMoney = st.money; setTxt(E.moneyT, money(st.money));
   }
+  let bagKey = '';
+  function updateBag() {
+    const st = G.state, inv = st.inventory || {};
+    let items = 0; for (const k in inv) if (inv[k] > 0) items += inv[k];
+    const key = (st.fishBag || []).length + '/' + items;
+    if (key === bagKey) return;
+    const grew = bagKey && (st.fishBag.length + items) > bagKey.split('/').reduce((a, b) => a + (+b), 0);
+    bagKey = key;
+    E.eBagN.textContent = 'Giỏ cá ' + (st.fishBag || []).length + '/30 · Túi ' + items + ' món';
+    if (grew) { E.eBag.classList.remove('bump'); void E.eBag.offsetWidth; E.eBag.classList.add('bump'); }
+  }
   function updateHUD() {
+    updateBag();
     const st = G.state;
     updateMoney();
     const c = conditions();
@@ -1138,6 +1219,55 @@ z-index:2;color:var(--paper);font-family:var(--fu);font-size:var(--fs);line-heig
     _right.setFromMatrixColumn(G.camera.matrixWorld, 0); _right.y = 0; _right.normalize();
     return _v.dot(_right);
   }
+  // thanh skill Q/E/R + Nộ + cấp Ngư Công; thanh vận chiêu của cá — chỉ hiện khi vật cá / đánh nhau
+  let skCtx = '';
+  function updateSkills() {
+    const m = G.state.mode, ctx = m === 'fight' ? 'fight' : m === 'combat' ? 'combat' : '';
+    const show = !!ctx && !!G.skills && !isOpen();
+    tog(E.skills, 'hide', !show);
+    updateFishCast(show ? ctx : '');
+    if (!show) { skCtx = ''; return; }
+    const list = G.skills.list(ctx);
+    if (skCtx !== ctx) {
+      skCtx = ctx;
+      E.skills.innerHTML = `<div class="sk-head plate"><div class="lv"><span class="lvt"></span><span class="lvp"></span></div><div class="xp"><i></i></div><div class="rg">Nộ<div class="rgt"><i></i></div><span class="rgn">0</span></div></div>` +
+        list.map((d) => `<div class="sk plate${d.ult ? ' ult' : ''}" title="${esc(d.desc)}"><span class="ico">${ic(d.icon)}<span class="kb">${d.label}</span></span><span><span class="nm">${esc(d.name)}</span><br><span class="cost">${d.ult ? 'Tuyệt chiêu · đầy Nộ' : d.rage + ' Nộ'}</span></span><i class="cd"></i><b class="sec"></b></div>`).join('');
+      E.skSlots = [...E.skills.querySelectorAll('.sk')].map((el) => ({ el, cd: el.querySelector('.cd'), sec: el.querySelector('.sec'), desc: '' }));
+      E.skLv = E.skills.querySelector('.lvt'); E.skLvP = E.skills.querySelector('.lvp'); E.skXp = E.skills.querySelector('.xp i');
+      E.skRage = E.skills.querySelector('.rgt i'); E.skRageN = E.skills.querySelector('.rgn');
+    }
+    const xi = G.skills.xpInfo(), rage = G.skills.rage;
+    const lvT = 'Ngư Công cấp ' + xi.lv, lvP = xi.lv >= 10 ? 'Tối đa' : Math.floor(xi.frac * 100) + '%';
+    if (E.skLv._t !== lvT) { E.skLv._t = lvT; E.skLv.textContent = lvT; }
+    if (E.skLvP._t !== lvP) { E.skLvP._t = lvP; E.skLvP.textContent = lvP; }
+    setScale(E.skXp, xi.frac); setScale(E.skRage, rage / 100);
+    const rn = String(Math.floor(rage)); if (E.skRageN._t !== rn) { E.skRageN._t = rn; E.skRageN.textContent = rn; }
+    list.forEach((d, i) => {
+      const sl = E.skSlots[i]; if (!sl) return;
+      setScale(sl.cd, d.cdLeft / d.cd);
+      const t = d.cdLeft > 0 ? Math.ceil(d.cdLeft) + 's' : '';
+      if (sl.sec._t !== t) { sl.sec._t = t; sl.sec.textContent = t; }
+      if (sl.desc !== d.desc) { sl.desc = d.desc; sl.el.title = d.desc; }
+      tog(sl.el, 'on', d.activeLeft > 0);
+      tog(sl.el, 'dim', !d.ready && !(d.activeLeft > 0));
+      tog(sl.el, 'ready', d.ult && d.ready);
+    });
+  }
+  function updateFishCast(ctx) {
+    const src = ctx === 'fight' ? (G.fishing && G.fishing.fight) : ctx === 'combat' ? (G.player && G.player.combat) : null;
+    const c = src && src.cast;
+    tog(E.fcast, 'hide', !c);
+    if (!c) return;
+    const col = '#' + c.color.toString(16).padStart(6, '0');
+    const name = c.name + (src.enraged ? ' ' : '');
+    if (E.fcName._t !== name + src.enraged) {
+      E.fcName._t = name + src.enraged;
+      E.fcName.innerHTML = esc(c.name) + (src.enraged ? '<span class="boss">Cuồng Nộ</span>' : '');
+      E.fcast.style.color = col;
+      E.fcTip.textContent = ctx === 'combat' ? 'E Lôi Điện để phá chiêu · hoặc chạy ra khỏi vòng đỏ' : 'E Lôi Điện để phá chiêu';
+    }
+    setScale(E.fcBar, c.progress);
+  }
   function updateFight() {
     const f = G.fishing && G.fishing.fight;
     const show = !!f && !isOpen();
@@ -1148,7 +1278,8 @@ z-index:2;color:var(--paper);font-family:var(--fu);font-size:var(--fs);line-heig
     const sp = ci.species;
     const cat = CAT[sp && sp.category];
     const col = disc && sp ? hexCss(sp.color) : (cat ? cat.color : '#8cc7d9');
-    setHTML(E.fName, `${ci.kind === 'fish' || !ci.kind ? fishFig(col, !disc) : ''}<span>${disc ? esc(ci.name || '???') : 'Cá lạ'}</span>${cat && disc ? `<span class="tag">${cat.label}</span>` : ''}`);
+    const fKey = (ci.id || '') + '|' + !!disc + '|' + (ci.name || ''); // ảnh base64 ~20KB: chỉ dựng lại khi đổi cá
+    if (E.fName._k !== fKey) { E.fName._k = fKey; setHTML(E.fName, `${ci.kind === 'fish' || !ci.kind ? fishFig(col, !disc, ci.id) : ''}<span>${disc ? esc(ci.name || '???') : 'Cá lạ'}</span>${cat && disc ? `<span class="tag">${cat.label}</span>` : ''}`); }
     setTxt(E.fDist, (f.distance != null ? num1(f.distance) : '?') + ' m');
     setScale(E.fLine, f.maxDistance ? (f.distance || 0) / f.maxDistance : 0);
     const t = clamp(f.tension || 0, 0, 1);
@@ -1162,7 +1293,8 @@ z-index:2;color:var(--paper);font-family:var(--fu);font-size:var(--fs);line-heig
     setScale(E.fStamFill, stam);
     setTxt(E.fStamP, Math.round(clamp(stam, 0, 1) * 100) + '%');
     const side = fishSide(f.fishDir);
-    const dir = side < -0.25 ? -1 : side > 0.25 ? 1 : 0; // cá chạy trái/phải
+    const dir = f.hidden ? 0 : side < -0.25 ? -1 : side > 0.25 ? 1 : 0; // cá chạy trái/phải (ẩn thân → không biết)
+    tog(E.fArrow, 'unk', !!f.hidden);
     const rot = dir < 0 ? -90 : dir > 0 ? 90 : 0;
     if (E.fArrow._r !== rot) { E.fArrow._r = rot; E.fArrow.style.transform = 'rotate(' + rot + 'deg)'; }
     tog(E.fArrow, 'idle', dir === 0);
@@ -1216,7 +1348,7 @@ z-index:2;color:var(--paper);font-family:var(--fu);font-size:var(--fs);line-heig
   }
 
   // ---------- Phím ----------
-  const KEY_PANELS = { KeyI: 'inventory', KeyC: 'craft', KeyM: 'map', KeyK: 'fishdex', KeyH: 'help', F1: 'help', KeyB: 'bait' };
+  const KEY_PANELS = { Tab: 'inventory', KeyI: 'inventory', KeyM: 'map', F1: 'help' };
   function handleKeys() {
     const inp = G.input; if (!inp || !inp.pressed) return;
     if (frame === openFrame) return;
@@ -1267,6 +1399,7 @@ z-index:2;color:var(--paper);font-family:var(--fu);font-size:var(--fs);line-heig
     tog(E.aimdot, 'hide', mode !== 'fishing' || isOpen() || castShown);
     updateFight();
     updateCombat();
+    updateSkills();
     if (mode !== 'fishing' && mode !== 'fight' && castShown) setCastMeter(null);
     if (mode !== 'fishing' && strikeShown) setStrikePrompt(false);
     frame++;
@@ -1291,6 +1424,7 @@ z-index:2;color:var(--paper);font-family:var(--fu);font-size:var(--fs);line-heig
       if (!d) return;
       if (d.result === 'line_broke') bigMessage('Đứt dây!', 'Dây căng quá. Ghì cần A/D và ngừng cuộn khi thanh căng chạm vạch đỏ', '#ef5a4c');
       else if (d.result === 'dragged') bigMessage('Bị cá kéo xuống nước!', 'Con này khỏe quá… bơi vào bờ đi!', '#4fb3bf');
+      else if (d.result === 'capsized') bigMessage('Lật thuyền!', 'Cá quá khỏe so với thuyền. Bơi vào bờ, nhấn E ở mép nước để hạ thuyền lại', '#ef5a4c');
     });
     on('fish:caught', (d) => {
       const ci = (d && d.catchInfo) || {};
